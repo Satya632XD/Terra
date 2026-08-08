@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Voxel Sandbox</title>
 <meta name="description" content="Voxel Sandbox — a browser-based 3D voxel survival game." />
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Segoe UI', Arial, sans-serif; }
   #root, canvas { display: block; }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; outline: none; touch-action: none; }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   #crosshair {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
     color: #fff; font-size: 24px; user-select: none; text-shadow: 0 0 3px #000;
@@ -31,42 +31,74 @@
   #webglError .title { font-size: 22px; font-weight: bold; }
   #webglError .desc { font-size: 14px; color: #aaa; max-width: 360px; }
 
-  #inventoryBar {
-    position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
-    display: flex; flex-direction: column; align-items: center; gap: 8px;
+  /* --- Rotate-to-landscape prompt --- */
+  #rotatePrompt {
+    position: fixed; inset: 0; z-index: 998; background: #0b0b0b;
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    color: #fff; text-align: center; gap: 14px; font-family: sans-serif;
+  }
+  #rotatePrompt .icon { font-size: 56px; animation: rotateHint 1.6s ease-in-out infinite; }
+  #rotatePrompt .title { font-size: 20px; font-weight: bold; }
+  #rotatePrompt .desc { font-size: 14px; color: #aaa; max-width: 280px; }
+  @keyframes rotateHint { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(90deg); } }
+
+  /* =========================================================================
+     BEDROCK-STYLE HUD — hearts / hunger / armor rows + pixel-bordered hotbar
+     ========================================================================= */
+  #vitalsHud {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 108px;
+    width: min(94vw, 560px);
+    display: flex; flex-direction: column; gap: 3px;
     pointer-events: none; user-select: none; z-index: 10;
-    color: #fff; text-shadow: 1px 1px 2px #000;
   }
-  #heldToolInfo {
-    background: rgba(0,0,0,0.6); padding: 6px 12px; border-radius: 20px; font-size: 14px;
-    font-weight: bold; display: none; align-items: center; gap: 8px;
+  .vitalsRow { display: flex; justify-content: space-between; }
+  .iconRow { display: flex; gap: 1px; }
+  .iconRow.reverse { flex-direction: row-reverse; }
+  .pixIcon {
+    width: 20px; height: 20px; position: relative;
+    image-rendering: pixelated; filter: drop-shadow(1px 1px 0 rgba(0,0,0,0.75));
   }
-  #heldToolInfo .bar { width: 60px; height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
-  #heldToolInfo .fill { height: 100%; }
-  #materialsRow { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
-  .matChip { background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 4px; font-size: 12px; display: flex; gap: 4px; }
-  .matChip .label { color: #ddd; text-transform: capitalize; }
-  .matChip .count { font-weight: bold; }
+  .pixIcon svg { width: 100%; height: 100%; display: block; }
+
+  #deathScreen {
+    position: fixed; inset: 0; z-index: 60; background: rgba(60,0,0,0.85);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    color: #fff; text-align: center; gap: 16px; font-family: sans-serif;
+  }
+  #deathScreen .title { font-size: 40px; font-weight: bold; color: #ff5555; text-shadow: 2px 2px 0 #000; }
+  #deathScreen .desc { font-size: 15px; color: #ddd; }
+  #deathScreen button {
+    padding: 12px 28px; font-size: 16px; font-weight: bold; border: 2px solid #000;
+    background: #4CAF50; color: #fff; border-radius: 4px; cursor: pointer;
+  }
 
   #hotbar {
-    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-    display: flex; gap: 20px; pointer-events: auto; user-select: none; z-index: 10;
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 3px; pointer-events: auto; user-select: none; z-index: 10;
+    background: rgba(20,20,20,0.55); padding: 4px; border-radius: 4px;
+    border: 2px solid rgba(0,0,0,0.4);
   }
-  #toolSlots, #blockSlots { display: flex; gap: 10px; }
-  .divider { width: 2px; background: #444; }
   .slot {
-    width: 64px; height: 64px; background: rgba(0,0,0,0.7);
-    border: 3px solid #333; border-radius: 8px; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; cursor: pointer;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.3); color: #fff; font-weight: bold; font-size: 10px;
-    text-transform: capitalize; text-shadow: 1px 1px 2px #000; text-align: center; padding: 4px;
+    width: 46px; height: 46px; background: rgba(139,139,139,0.55);
+    border: 2px solid #2b2b2b; border-radius: 2px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; cursor: pointer; position: relative;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15); color: #fff; font-weight: bold; font-size: 8px;
+    text-transform: capitalize; text-shadow: 1px 1px 2px #000; text-align: center; padding: 2px;
   }
-  .slot.selected { border-color: #fff; }
-  .slot.equipped { border-color: #4CAF50; }
-  .slot.empty { color: #666; background: rgba(0,0,0,0.5); cursor: default; }
-  .slot .num { font-size: 10px; color: #ccc; margin-bottom: 4px; }
-  .slot .durBar { margin-top: auto; width: 100%; height: 4px; background: #333; border-radius: 2px; }
-  .slot .durFill { height: 100%; border-radius: 2px; }
+  .slot.selected { border-color: #fff; box-shadow: inset 0 0 0 1px #fff, 0 0 4px rgba(255,255,255,0.8); }
+  .slot.equipped { border-color: #FFD54F; box-shadow: inset 0 0 0 1px #FFD54F; }
+  .slot.empty { color: #999; background: rgba(60,60,60,0.35); cursor: default; }
+  .slot .num { position: absolute; top: 1px; left: 3px; font-size: 9px; color: #eee; }
+  .slot .swatch { width: 26px; height: 26px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.4); margin-bottom: 1px; }
+  .slot .stackCount { position: absolute; bottom: 1px; right: 3px; font-size: 10px; font-weight: bold; color: #fff; text-shadow: 1px 1px 1px #000; }
+  .slot .durBar { position: absolute; bottom: 3px; left: 4px; right: 4px; height: 3px; background: #222; border-radius: 1px; }
+  .slot .durFill { height: 100%; border-radius: 1px; }
+  #armorSlotsRow {
+    position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%);
+    margin-left: -170px;
+    display: flex; gap: 3px; pointer-events: auto; user-select: none; z-index: 10;
+  }
+  #armorSlotsRow .slot { width: 30px; height: 30px; }
 
   #craftingPanel {
     position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.85);
@@ -140,26 +172,38 @@
   .shelfItem .cellLabel { font-size: 8px; color: #ddd; text-transform: capitalize; line-height: 1.1; }
   .shelfItem .cellCount { position: absolute; bottom: 2px; right: 4px; font-size: 10px; font-weight: bold; color: #fff; text-shadow: 1px 1px 1px #000; }
   #craftingInvShelf .shelfEmpty { color: #666; font-size: 13px; padding: 8px; }
+  #craftingGearTitle { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin: 12px 0 8px; }
+  #craftingGearShelf { display: flex; flex-wrap: wrap; gap: 6px; overflow-y: auto; max-height: 110px; }
+  .gearItem {
+    width: 60px; height: 60px; background: #2A2A2A; border: 2px solid #3d3d3d; border-radius: 6px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    cursor: pointer; position: relative; text-align: center; padding: 2px;
+  }
+  .gearItem.activeSelect { border-color: #FFD54F; box-shadow: 0 0 0 1px #FFD54F; }
+  .gearItem .cellLabel { font-size: 8px; color: #ddd; text-transform: capitalize; line-height: 1.1; }
+  .gearItem .gearDurBar { width: 90%; height: 4px; background: #111; border-radius: 2px; margin-top: 3px; overflow: hidden; }
+  .gearItem .gearDurFill { height: 100%; }
 </style>
-</head>
 </head>
 <body>
 <div id="root">
   <canvas id="gameCanvas"></canvas>
   <div id="crosshair">+</div>
 
-  <div id="inventoryBar">
-    <div id="heldToolInfo">
-      <span id="heldToolName"></span>
-      <div class="bar"><div class="fill" id="heldToolFill"></div></div>
+  <div id="vitalsHud">
+    <div class="vitalsRow">
+      <div class="iconRow" id="heartsRow"></div>
+      <div class="iconRow reverse" id="hungerRow"></div>
     </div>
-    <div id="materialsRow"></div>
   </div>
 
-  <div id="hotbar">
-    <div id="toolSlots"></div>
-    <div class="divider"></div>
-    <div id="blockSlots"></div>
+  <div id="armorSlotsRow"></div>
+  <div id="hotbar"></div>
+
+  <div id="deathScreen">
+    <div class="title">You Died</div>
+    <div class="desc">Hunger and hazards can still get you. Press Respawn to get back up.</div>
+    <button id="respawnBtn">Respawn</button>
   </div>
 
   <div id="craftingPanel">
@@ -188,15 +232,25 @@
 
       <div id="craftingInvTitle">Your Items</div>
       <div id="craftingInvShelf"></div>
+
+      <div id="craftingGearTitle">Your Gear &nbsp;<span style="color:#888;font-weight:normal;">(tap a tool to wield it, tap armor to wear it)</span></div>
+      <div id="craftingGearShelf"></div>
     </div>
   </div>
 
   <div id="clickToPlay">
-    <div class="title">Click to Play</div>
-    <div class="hint">WASD to move &nbsp;|&nbsp; Space to jump &nbsp;|&nbsp; Left-click mine &nbsp;|&nbsp; Right-click place &nbsp;|&nbsp; 1..8 switch blocks &nbsp;|&nbsp; E for Crafting &nbsp;|&nbsp; F to use a Crafting Table &nbsp;|&nbsp; Walk over drops to collect</div>
+    <div class="title">Tap to Play</div>
+    <div class="hint">WASD to move &nbsp;|&nbsp; Space to jump &nbsp;|&nbsp; Left-click mine &nbsp;|&nbsp; Right-click place &nbsp;|&nbsp; 1..9 switch slot &nbsp;|&nbsp; E Crafting &nbsp;|&nbsp; F use table &nbsp;|&nbsp; G eat &nbsp;|&nbsp; Walk over drops to collect</div>
+  </div>
+
+  <div id="rotatePrompt">
+    <div class="icon">&#128241;</div>
+    <div class="title">Rotate to Landscape</div>
+    <div class="desc">This game plays best in landscape. Tap anywhere to go fullscreen and lock the view.</div>
   </div>
 
   <div id="webglError">
+
     <div class="icon">&#9888;</div>
     <div class="title">WebGL not available</div>
     <div class="desc">Your browser or device does not support WebGL, which is required to run this 3D game. Try opening it in a modern desktop browser such as Chrome or Firefox.</div>
@@ -263,6 +317,27 @@ const TOOL_DEFS = {
   large_shovel:  { material: 'large', type: 'shovel',  durability: 400, miningSpeed: 11.0 },
   large_hammer:  { material: 'large', type: 'hammer',  durability: 500, miningSpeed: 13.0 },
 };
+
+// Armor pieces: worn in 4 fixed slots (helmet/chest/legs/boots), each reduces
+// incoming damage by a flat percentage while equipped, and (like tools) wears
+// down with each hit taken until it breaks. Iron-tier only for now — there's
+// no animal/leather source yet, so a leather tier would be uncraftable.
+const ARMOR_SLOTS = ['helmet', 'chest', 'legs', 'boots'];
+const ARMOR_DEFS = {
+  iron_helmet:     { slot: 'helmet', material: 'iron', reduction: 0.10, durability: 165 },
+  iron_chest:      { slot: 'chest',  material: 'iron', reduction: 0.16, durability: 240 },
+  iron_legs:       { slot: 'legs',   material: 'iron', reduction: 0.13, durability: 225 },
+  iron_boots:      { slot: 'boots',  material: 'iron', reduction: 0.07, durability: 195 },
+};
+
+// Food items: eaten from the hotbar/inventory (press G with the item
+// selected) to restore hunger. Apples are foraged from leaves while chopping
+// trees — there's no animal/farming system yet, so that's the only source.
+const FOOD_DEFS = {
+  apple: { hunger: 4, healBonus: 0 },
+};
+
+
 
 const BLOCK_HARDNESS = {
   grass: 0.9, dirt: 0.75, stone: 7.5, wood: 3.0, brick: 10.0,
@@ -402,6 +477,20 @@ const RECIPES = [
       [null, null, 'stick', null],
       [null, null, 'stick', null],
     ] },
+
+  // ---- Armor (table tier, standard Minecraft-style shapes) ----
+  { id: 'iron_helmet', label: 'Iron Helmet', tier: 'table',
+    result: { item: 'iron_helmet', count: 1 },
+    grid: [ ['iron_ingot', 'iron_ingot', 'iron_ingot'], ['iron_ingot', null, 'iron_ingot'], [null, null, null] ] },
+  { id: 'iron_chest', label: 'Iron Chestplate', tier: 'table',
+    result: { item: 'iron_chest', count: 1 },
+    grid: [ ['iron_ingot', null, 'iron_ingot'], ['iron_ingot', 'iron_ingot', 'iron_ingot'], ['iron_ingot', 'iron_ingot', 'iron_ingot'] ] },
+  { id: 'iron_legs', label: 'Iron Leggings', tier: 'table',
+    result: { item: 'iron_legs', count: 1 },
+    grid: [ ['iron_ingot', 'iron_ingot', 'iron_ingot'], ['iron_ingot', null, 'iron_ingot'], ['iron_ingot', null, 'iron_ingot'] ] },
+  { id: 'iron_boots', label: 'Iron Boots', tier: 'table',
+    result: { item: 'iron_boots', count: 1 },
+    grid: [ ['iron_ingot', null, 'iron_ingot'], ['iron_ingot', null, 'iron_ingot'], [null, null, null] ] },
 ];
 
 /* =========================================================================
@@ -711,7 +800,8 @@ function getHeldTool() {
 }
 function addItem(item, count, durability, maxDurability) {
   const isTool = TOOL_DEFS[item] !== undefined;
-  if (!isTool) {
+  const isArmor = ARMOR_DEFS[item] !== undefined;
+  if (!isTool && !isArmor) {
     const existing = inventory.find(i => i.item === item);
     if (existing) existing.count += count;
     else inventory.push({ item, count });
@@ -742,6 +832,7 @@ function removeItem(item, count) {
         remaining -= inventory[i].count;
         if (heldToolIndex === i) heldToolIndex = null;
         else if (heldToolIndex !== null && heldToolIndex > i) heldToolIndex--;
+        reindexArmorAfterRemoval(i);
         inventory.splice(i, 1);
       }
     }
@@ -770,6 +861,151 @@ function damageHeldTool() {
       heldToolIndex = null;
     }
     notifyInventory();
+  }
+}
+
+// --- Armor equip slots (separate from the held tool) ---
+// { helmet: inventoryIndex|null, chest: ..., legs: ..., boots: ... }
+const equippedArmorIndex = { helmet: null, chest: null, legs: null, boots: null };
+function getEquippedArmor(slot) {
+  const idx = equippedArmorIndex[slot];
+  return idx === null ? null : (inventory[idx] || null);
+}
+function equipArmor(index) {
+  const item = inventory[index];
+  if (!item || !ARMOR_DEFS[item.item]) return;
+  const slot = ARMOR_DEFS[item.item].slot;
+  equippedArmorIndex[slot] = index;
+  notifyInventory();
+}
+function unequipArmor(slot) {
+  equippedArmorIndex[slot] = null;
+  notifyInventory();
+}
+// Total damage reduction fraction (0..~0.85 cap) across all worn pieces.
+function getArmorReduction() {
+  let total = 0;
+  ARMOR_SLOTS.forEach(slot => {
+    const piece = getEquippedArmor(slot);
+    if (piece && ARMOR_DEFS[piece.item]) total += ARMOR_DEFS[piece.item].reduction;
+  });
+  return Math.min(0.85, total);
+}
+// When an armor-holding inventory slot gets removed/shifted (item broke,
+// stack consumed, etc.), keep equippedArmorIndex pointers valid.
+function reindexArmorAfterRemoval(removedIndex) {
+  ARMOR_SLOTS.forEach(slot => {
+    const idx = equippedArmorIndex[slot];
+    if (idx === null) return;
+    if (idx === removedIndex) equippedArmorIndex[slot] = null;
+    else if (idx > removedIndex) equippedArmorIndex[slot] = idx - 1;
+  });
+}
+function damageArmorPiece(slot) {
+  const idx = equippedArmorIndex[slot];
+  if (idx === null) return;
+  const piece = inventory[idx];
+  if (piece && piece.durability !== undefined) {
+    piece.durability--;
+    if (piece.durability <= 0) {
+      inventory.splice(idx, 1);
+      reindexArmorAfterRemoval(idx);
+    }
+    notifyInventory();
+  }
+}
+
+/* =========================================================================
+   PLAYER STATS  (health, hunger, damage/regen/starvation)
+   10 hearts (20 HP) and 10 food icons (20 hunger), Bedrock/Java-style:
+   - Hunger slowly depletes over time and faster while sprinting/mining.
+   - Health slowly regenerates while hunger is high enough (>= 18).
+   - At 0 hunger, the player takes periodic starvation damage instead.
+   - Fall damage scales with fall distance beyond a safe threshold.
+   - Armor worn in the 4 equip slots reduces all incoming damage.
+   ========================================================================= */
+const MAX_HEALTH = 20;
+const MAX_HUNGER = 20;
+let health = MAX_HEALTH;
+let hunger = MAX_HUNGER;
+let isDead = false;
+const statsListeners = new Set();
+function subscribeStats(fn) { statsListeners.add(fn); return () => statsListeners.delete(fn); }
+function notifyStats() { statsListeners.forEach(fn => fn()); }
+function getHealth() { return health; }
+function getHunger() { return hunger; }
+function getIsDead() { return isDead; }
+
+function applyDamage(amount) {
+  if (isDead || amount <= 0) return;
+  const reduction = getArmorReduction();
+  const finalAmount = amount * (1 - reduction);
+  health = Math.max(0, health - finalAmount);
+  // Every hit that connects wears down each worn armor piece a little.
+  if (reduction > 0) ARMOR_SLOTS.forEach(slot => { if (getEquippedArmor(slot)) damageArmorPiece(slot); });
+  if (health <= 0) { isDead = true; }
+  notifyStats();
+}
+
+function healPlayer(amount) {
+  if (isDead) return;
+  health = Math.min(MAX_HEALTH, health + amount);
+  notifyStats();
+}
+
+function eatFood(inventoryIndex) {
+  const item = inventory[inventoryIndex];
+  if (!item || !FOOD_DEFS[item.item]) return false;
+  if (hunger >= MAX_HUNGER) return false;
+  const def = FOOD_DEFS[item.item];
+  hunger = Math.min(MAX_HUNGER, hunger + def.hunger);
+  if (def.healBonus) healPlayer(def.healBonus);
+  removeItem(item.item, 1);
+  notifyStats();
+  return true;
+}
+
+function respawnPlayer() {
+  health = MAX_HEALTH;
+  hunger = MAX_HUNGER;
+  isDead = false;
+  notifyStats();
+}
+
+// Ticks hunger drain, starvation damage, and passive regen. Called once per
+// frame with elapsed delta and whether the player is actively moving/mining
+// (drains hunger a bit faster) — mirrors Bedrock's slow background drain.
+let hungerDrainAccum = 0;
+let starveDamageAccum = 0;
+let regenAccum = 0;
+function updatePlayerStats(delta, isActive) {
+  if (isDead) return;
+
+  hungerDrainAccum += delta * (isActive ? 1.6 : 1.0);
+  const HUNGER_TICK_SECONDS = 12; // lose 1 hunger point roughly every 12s of play
+  if (hungerDrainAccum >= HUNGER_TICK_SECONDS) {
+    hungerDrainAccum -= HUNGER_TICK_SECONDS;
+    if (hunger > 0) { hunger -= 1; notifyStats(); }
+  }
+
+  if (hunger <= 0) {
+    starveDamageAccum += delta;
+    if (starveDamageAccum >= 4) {
+      starveDamageAccum = 0;
+      applyDamage(1);
+    }
+  } else {
+    starveDamageAccum = 0;
+  }
+
+  if (hunger >= 18 && health < MAX_HEALTH && health > 0) {
+    regenAccum += delta;
+    if (regenAccum >= 3) {
+      regenAccum = 0;
+      healPlayer(1);
+    }
+  } else {
+    regenAccum = 0;
   }
 }
 
@@ -926,8 +1162,11 @@ function craftItem(recipeId) {
   }
   for (const item in counts) removeItem(item, counts[item]);
   const toolDef = TOOL_DEFS[recipe.result.item];
+  const armorDef = ARMOR_DEFS[recipe.result.item];
   if (toolDef) {
     addItem(recipe.result.item, recipe.result.count, toolDef.durability, toolDef.durability);
+  } else if (armorDef) {
+    addItem(recipe.result.item, recipe.result.count, armorDef.durability, armorDef.durability);
   } else {
     addItem(recipe.result.item, recipe.result.count);
   }
@@ -1011,8 +1250,11 @@ class CraftingGridState {
     }
     for (const item in counts) removeItem(item, counts[item]);
     const toolDef = TOOL_DEFS[recipe.result.item];
+    const armorDef = ARMOR_DEFS[recipe.result.item];
     if (toolDef) {
       addItem(recipe.result.item, recipe.result.count, toolDef.durability, toolDef.durability);
+    } else if (armorDef) {
+      addItem(recipe.result.item, recipe.result.count, armorDef.durability, armorDef.durability);
     } else {
       addItem(recipe.result.item, recipe.result.count);
     }
@@ -1038,11 +1280,15 @@ class InputManager {
     this.isHoldingPlace = false;
     this.craftingKeyTriggered = false;
     this.interactTriggered = false;
+    this.eatTriggered = false;
+    this.respawnTriggered = false;
 
     this.onKeyDown = (e) => {
       this.keys[e.code] = true;
       if (e.code === 'KeyE') this.craftingKeyTriggered = true;
       if (e.code === 'KeyF') this.interactTriggered = true;
+      if (e.code === 'KeyG') this.eatTriggered = true;
+      if (e.code === 'KeyR') this.respawnTriggered = true;
     };
     this.onKeyUp = (e) => { this.keys[e.code] = false; };
     this.onMouseDown = (e) => {
@@ -1068,6 +1314,8 @@ class InputManager {
     this.placeTriggered = false;
     this.craftingKeyTriggered = false;
     this.interactTriggered = false;
+    this.eatTriggered = false;
+    this.respawnTriggered = false;
     this.lookDelta.dx = 0;
     this.lookDelta.dy = 0;
   }
@@ -1182,11 +1430,18 @@ function updateMining(isHoldingMine, hitResult, blockType, delta) {
     }
 
     let droppedItem = null;
+    let bonusDrop = null;
     if (canDrop) {
       const dropMapEntry = BLOCK_DROPS[blockType];
       droppedItem = dropMapEntry === undefined ? blockType : dropMapEntry;
       if (blockType === 'iron_ore') droppedItem = 'raw_iron';
       if (blockType === 'diamond_ore') droppedItem = 'diamond';
+      // Foraging bonus: breaking leaves has a small chance to also turn up
+      // something edible, since there's no animal/farming system yet.
+      if (blockType === 'leaves') {
+        const roll = Math.random();
+        if (roll < 0.06) bonusDrop = 'apple';
+      }
     }
 
     if (heldToolItem && TOOL_DEFS[heldToolItem.item]) {
@@ -1195,10 +1450,10 @@ function updateMining(isHoldingMine, hitResult, blockType, delta) {
 
     const pos = hitResult.pos.clone();
     resetMining();
-    return { mined: true, pos: pos, droppedItem: droppedItem };
+    return { mined: true, pos: pos, droppedItem: droppedItem, bonusDrop: bonusDrop };
   }
 
-  return { mined: false, pos: null, droppedItem: null };
+  return { mined: false, pos: null, droppedItem: null, bonusDrop: null };
 }
 
 function resetMining() {
@@ -1342,6 +1597,7 @@ class Player {
     this.speed = 5.0;
     this.gravity = 20.0;
     this.jumpForce = 8.0;
+    this.fallStartY = null; // tracks the highest Y since leaving the ground, for fall damage
 
     this.camera.position.set(0, 5, 5);
     this.camera.lookAt(0, 5, 0);
@@ -1371,7 +1627,16 @@ class Player {
     return false;
   }
 
+  respawn() {
+    this.camera.position.set(0, 8, 5);
+    this.velocity.set(0, 0, 0);
+    this.fallStartY = null;
+    this.onGround = false;
+  }
+
   update(delta, input) {
+    if (getIsDead()) return; // frozen while dead, waiting on respawn
+
     if (input.isTouch) {
       const euler = new THREE.Euler(0, 0, 0, 'YXZ');
       euler.setFromQuaternion(this.camera.quaternion);
@@ -1392,6 +1657,7 @@ class Player {
     }
 
     this.direction.normalize();
+    this.isMovingInput = this.direction.x !== 0 || this.direction.z !== 0;
 
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
     forward.y = 0;
@@ -1422,13 +1688,39 @@ class Player {
       this.camera.position.z -= moveVector.z;
     }
 
+    // Track the apex of the current fall/jump so we can compute fall damage
+    // once the player actually lands (mirrors Bedrock: only damage on impact,
+    // measured from the highest point since last touching ground).
+    if (!this.onGround) {
+      if (this.fallStartY === null || this.camera.position.y > this.fallStartY) {
+        this.fallStartY = this.camera.position.y;
+      }
+    }
+
     this.camera.position.y += this.velocity.y * delta;
     if (this.checkCollision(this.camera.position)) {
-      if (this.velocity.y < 0) this.onGround = true;
+      if (this.velocity.y < 0) {
+        this.onGround = true;
+        if (this.fallStartY !== null) {
+          const fallDistance = this.fallStartY - this.camera.position.y;
+          const SAFE_FALL = 3.5; // blocks of fall before it starts to hurt
+          if (fallDistance > SAFE_FALL) {
+            applyDamage(Math.floor(fallDistance - SAFE_FALL) * 2);
+          }
+          this.fallStartY = null;
+        }
+      }
       this.camera.position.y -= this.velocity.y * delta;
       this.velocity.y = 0;
     } else {
       this.onGround = false;
+    }
+
+    // Falling into the void (below the world) is instant-death territory —
+    // just apply heavy damage repeatedly rather than a hard kill, so armor
+    // and hunger, if any headroom, still matter, but it's effectively fatal.
+    if (this.camera.position.y < -20) {
+      applyDamage(4);
     }
   }
 
@@ -2170,6 +2462,9 @@ function setupMobileControls(input) {
   createButton('Use', '180px', '200px',
     () => { input.interactTriggered = true; }
   );
+  createButton('Eat', '260px', '160px',
+    () => { input.eatTriggered = true; }
+  );
 
   return () => {
     if (container.parentElement) container.parentElement.removeChild(container);
@@ -2190,14 +2485,15 @@ function setSelectedBlockIndex(index) {
   selectionListeners.forEach(fn => fn(index));
 }
 
-// The hotbar's block slots are derived live from the player's inventory: only
-// placeable block types the player actually holds show up, in the order they
-// were first picked up. This replaces the old fixed/free HOTBAR_BLOCKS list.
+// The hotbar's slots are derived live from the player's inventory: only
+// placeable block types and food items the player actually holds show up, in
+// the order they were first picked up. This replaces the old fixed/free
+// HOTBAR_BLOCKS list.
 function getHotbarBlockStacks() {
   const seen = new Set();
   const stacks = [];
   inventory.forEach(entry => {
-    if (isPlaceableBlock(entry.item) && !seen.has(entry.item)) {
+    if ((isPlaceableBlock(entry.item) || FOOD_DEFS[entry.item] !== undefined) && !seen.has(entry.item)) {
       seen.add(entry.item);
       stacks.push(entry.item);
     }
@@ -2234,60 +2530,215 @@ function initUI() {
     setPlaying(document.pointerLockElement === document.getElementById('gameCanvas'));
   });
 
-  // --- Hotbar ---
-  const toolSlotsEl = document.getElementById('toolSlots');
-  const blockSlotsEl = document.getElementById('blockSlots');
-
-  function renderHotbar() {
-    // Rebuild block slots from whatever placeable blocks are currently in
-    // the inventory (nothing shows here until the player has actually mined
-    // or crafted something).
-    blockSlotsEl.innerHTML = '';
-    const hotbarBlocks = getHotbarBlockStacks();
-    if (hotbarBlocks.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'slot empty';
-      empty.textContent = 'No Blocks';
-      blockSlotsEl.appendChild(empty);
-    } else {
-      hotbarBlocks.forEach((block, idx) => {
-        const slot = document.createElement('div');
-        slot.className = 'slot' + (idx === currentSelectedBlockIndex ? ' selected' : '');
-        slot.style.backgroundColor = BLOCK_COLORS[block].side;
-        const count = getItemCount(block);
-        slot.innerHTML = '<span class="num">' + (idx + 1) + '</span>' + block.replace(/_/g, ' ') +
-          '<div style="margin-top:2px;font-size:11px;">x' + count + '</div>';
-        slot.addEventListener('click', () => setSelectedBlockIndex(idx));
-        blockSlotsEl.appendChild(slot);
-      });
-      if (currentSelectedBlockIndex >= hotbarBlocks.length) {
-        currentSelectedBlockIndex = Math.max(0, hotbarBlocks.length - 1);
+  /* ---------------------------------------------------------------------
+     Bedrock-style pixel icon SVGs (hearts / hunger / armor)
+     --------------------------------------------------------------------- */
+  // Renders a tiny bitmap (array of row-strings, '1'=filled/'0'=empty) as
+  // crisp square pixels — much more legible at 18-20px than smooth curves,
+  // and matches the blocky look of the reference HUD.
+  function bitmapSVG(rows, fillColor, bgColor, clipCols) {
+    const h = rows.length, w = rows[0].length;
+    let rects = '';
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (rows[y][x] !== '1') continue;
+        const color = (clipCols !== undefined && x >= clipCols) ? bgColor : fillColor;
+        if (!color) continue;
+        rects += '<rect x="' + x + '" y="' + y + '" width="1" height="1" fill="' + color + '"/>';
       }
     }
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" shape-rendering="crispEdges">' + rects + '</svg>';
+  }
 
-    // Rebuild tool slots
-    toolSlotsEl.innerHTML = '';
-    const inv = getInventory();
-    const heldIdx = getHeldToolIndex();
-    const toolItems = [];
-    inv.forEach((item, idx) => { if (item.durability !== undefined) toolItems.push({ item, idx }); });
+  const HEART_BITMAP = [
+    '01100110',
+    '11111111',
+    '11111111',
+    '11111111',
+    '01111110',
+    '00111100',
+    '00011000',
+    '00000000',
+  ];
+  const HEART_OUTLINE = [
+    '01100110',
+    '11111111',
+    '11111111',
+    '11111111',
+    '01111110',
+    '00111100',
+    '00011000',
+    '00000000',
+  ];
+  function heartSVG(state) {
+    // state: 'full' | 'half' | 'empty'
+    if (state === 'empty') {
+      return bitmapSVG(HEART_OUTLINE, '#4a1414', null);
+    }
+    const clipCols = state === 'half' ? 4 : 8;
+    return bitmapSVG(HEART_BITMAP, '#e62222', '#4a1414', clipCols);
+  }
 
-    if (toolItems.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'slot empty';
-      empty.textContent = 'No Tool';
-      toolSlotsEl.appendChild(empty);
-    } else {
-      toolItems.forEach(({ item, idx }) => {
-        const slot = document.createElement('div');
-        slot.className = 'slot' + (heldIdx === idx ? ' equipped' : '');
-        const pct = Math.max(0, Math.min(100, (item.durability / item.maxDurability) * 100));
-        const barColor = (item.durability / item.maxDurability) > 0.3 ? '#4CAF50' : '#FF5252';
-        slot.innerHTML = item.item.replace(/_/g, ' ') +
+  const DRUMSTICK_BITMAP = [
+    '00011000',
+    '00111100',
+    '00111100',
+    '00011010',
+    '00010110',
+    '00100011',
+    '01000001',
+    '10000000',
+  ];
+  function drumstickSVG(state) {
+    if (state === 'empty') {
+      return bitmapSVG(DRUMSTICK_BITMAP, '#4a3319', null);
+    }
+    const clipCols = state === 'half' ? 4 : 8;
+    return bitmapSVG(DRUMSTICK_BITMAP, '#c98a3f', '#4a3319', clipCols);
+  }
+
+  const ARMOR_BITMAPS = {
+    helmet: [
+      '00111100',
+      '01111110',
+      '01100110',
+      '01100110',
+      '01111110',
+      '00000000',
+      '00000000',
+      '00000000',
+    ],
+    chest: [
+      '01100110',
+      '11111111',
+      '11111111',
+      '11111111',
+      '01111110',
+      '00111100',
+      '00000000',
+      '00000000',
+    ],
+    legs: [
+      '11111111',
+      '11111111',
+      '11011011',
+      '11011011',
+      '11011011',
+      '11011011',
+      '11011011',
+      '00000000',
+    ],
+    boots: [
+      '11011011',
+      '11011011',
+      '11011011',
+      '11011011',
+      '11011111',
+      '11011111',
+      '11111111',
+      '00000000',
+    ],
+  };
+  function armorIconSVG(slot) {
+    return bitmapSVG(ARMOR_BITMAPS[slot], '#b8bec4', null);
+  }
+
+  // --- Hearts / Hunger vitals ---
+  const heartsRowEl = document.getElementById('heartsRow');
+  const hungerRowEl = document.getElementById('hungerRow');
+  function renderVitals() {
+    const hp = getHealth();
+    const hg = getHunger();
+    heartsRowEl.innerHTML = '';
+    for (let i = 0; i < 10; i++) {
+      const pointVal = hp - i * 2;
+      const state = pointVal >= 2 ? 'full' : (pointVal >= 1 ? 'half' : 'empty');
+      const icon = document.createElement('div');
+      icon.className = 'pixIcon';
+      icon.innerHTML = heartSVG(state);
+      heartsRowEl.appendChild(icon);
+    }
+    hungerRowEl.innerHTML = '';
+    for (let i = 0; i < 10; i++) {
+      const pointVal = hg - i * 2;
+      const state = pointVal >= 2 ? 'full' : (pointVal >= 1 ? 'half' : 'empty');
+      const icon = document.createElement('div');
+      icon.className = 'pixIcon';
+      icon.innerHTML = drumstickSVG(state);
+      hungerRowEl.appendChild(icon);
+    }
+  }
+  subscribeStats(renderVitals);
+  renderVitals();
+
+  // --- Death screen ---
+  const deathScreenEl = document.getElementById('deathScreen');
+  const respawnBtnEl = document.getElementById('respawnBtn');
+  function renderDeathScreen() {
+    deathScreenEl.style.display = getIsDead() ? 'flex' : 'none';
+  }
+  subscribeStats(renderDeathScreen);
+  renderDeathScreen();
+  respawnBtnEl.addEventListener('click', () => {
+    respawnPlayer();
+    if (window.__voxelPlayer) window.__voxelPlayer.respawn();
+  });
+
+  // --- Armor slots row (equipped gear, tap to unequip) ---
+  const armorSlotsRowEl = document.getElementById('armorSlotsRow');
+  function renderArmorSlots() {
+    armorSlotsRowEl.innerHTML = '';
+    ARMOR_SLOTS.forEach(slot => {
+      const piece = getEquippedArmor(slot);
+      const el = document.createElement('div');
+      el.className = 'slot' + (piece ? ' equipped' : ' empty');
+      if (piece) {
+        const pct = Math.max(0, Math.min(100, (piece.durability / piece.maxDurability) * 100));
+        const barColor = (piece.durability / piece.maxDurability) > 0.3 ? '#4CAF50' : '#FF5252';
+        el.innerHTML = '<div class="pixIcon" style="width:22px;height:22px;">' + armorIconSVG(slot) + '</div>' +
           '<div class="durBar"><div class="durFill" style="background:' + barColor + ';width:' + pct + '%"></div></div>';
-        slot.addEventListener('click', () => equipTool(heldIdx === idx ? null : idx));
-        toolSlotsEl.appendChild(slot);
-      });
+        el.title = piece.item.replace(/_/g, ' ');
+        el.addEventListener('click', () => unequipArmor(slot));
+      } else {
+        el.innerHTML = '<div class="pixIcon" style="width:22px;height:22px;opacity:0.35;">' + armorIconSVG(slot) + '</div>';
+      }
+      armorSlotsRowEl.appendChild(el);
+    });
+  }
+  subscribeInventory(renderArmorSlots);
+  renderArmorSlots();
+
+  // --- Hotbar (single Bedrock-style row: blocks + food, numbered 1-9) ---
+  const hotbarEl = document.getElementById('hotbar');
+
+  function renderHotbar() {
+    hotbarEl.innerHTML = '';
+    const hotbarBlocks = getHotbarBlockStacks();
+
+    if (currentSelectedBlockIndex >= hotbarBlocks.length) {
+      currentSelectedBlockIndex = Math.max(0, hotbarBlocks.length - 1);
+    }
+
+    const slotCount = Math.max(9, hotbarBlocks.length);
+    for (let idx = 0; idx < slotCount; idx++) {
+      const item = hotbarBlocks[idx];
+      const slot = document.createElement('div');
+      if (!item) {
+        slot.className = 'slot empty';
+        slot.innerHTML = '<span class="num">' + (idx + 1) + '</span>';
+        hotbarEl.appendChild(slot);
+        continue;
+      }
+      slot.className = 'slot' + (idx === currentSelectedBlockIndex ? ' selected' : '');
+      const count = getItemCount(item);
+      const isFood = FOOD_DEFS[item] !== undefined;
+      const swatchColor = isFood ? '#c98a3f' : ((BLOCK_COLORS[item] && BLOCK_COLORS[item].side) || '#888');
+      slot.innerHTML = '<span class="num">' + (idx + 1) + '</span>' +
+        '<div class="swatch" style="background:' + swatchColor + ';"></div>' +
+        '<span class="stackCount">' + count + '</span>';
+      slot.title = item.replace(/_/g, ' ') + (isFood ? ' (food — press G to eat)' : '');
+      slot.addEventListener('click', () => setSelectedBlockIndex(idx));
+      hotbarEl.appendChild(slot);
     }
   }
 
@@ -2295,46 +2746,12 @@ function initUI() {
   subscribeInventory(renderHotbar);
   renderHotbar();
 
-  // --- Inventory bar (held tool info + tracked materials) ---
-  const heldToolInfo = document.getElementById('heldToolInfo');
-  const heldToolName = document.getElementById('heldToolName');
-  const heldToolFill = document.getElementById('heldToolFill');
-  const materialsRow = document.getElementById('materialsRow');
-  const trackingItems = ['log', 'planks', 'stick', 'raw_iron', 'iron_ingot', 'cobblestone', 'diamond', 'crafting_table', 'large_crafting_table'];
-
-  function renderInventoryBar() {
-    const heldTool = getHeldTool();
-    if (heldTool) {
-      heldToolInfo.style.display = 'flex';
-      heldToolName.textContent = heldTool.item.replace(/_/g, ' ');
-      if (heldTool.maxDurability) {
-        heldToolFill.parentElement.style.display = 'block';
-        const pct = Math.max(0, Math.min(100, (heldTool.durability / heldTool.maxDurability) * 100));
-        heldToolFill.style.width = pct + '%';
-        heldToolFill.style.backgroundColor = (heldTool.durability / heldTool.maxDurability) > 0.3 ? '#4CAF50' : '#FF5252';
-      } else {
-        heldToolFill.parentElement.style.display = 'none';
-      }
-    } else {
-      heldToolInfo.style.display = 'none';
-    }
-
-    materialsRow.innerHTML = '';
-    const inv = getInventory();
-    trackingItems.forEach(item => {
-      const count = inv.filter(i => i.item === item).reduce((sum, i) => sum + i.count, 0);
-      if (count === 0) return;
-      const chip = document.createElement('div');
-      chip.className = 'matChip';
-      chip.innerHTML = '<span class="label">' + item.replace(/_/g, ' ') + '</span><span class="count">' + count + '</span>';
-      materialsRow.appendChild(chip);
-    });
-  }
-
-  subscribeInventory(renderInventoryBar);
-  renderInventoryBar();
+  // --- Held tool indicator + tracked materials chips removed in favor of
+  // the Bedrock-style hotbar/armor rows above; tools are equipped from the
+  // crafting panel's item shelf (tap a tool there to wield/unwield it). ---
 
   // --- Crafting panel ---
+
   const craftingPanel = document.getElementById('craftingPanel');
   const craftingCloseBtn = document.getElementById('craftingClose');
   const craftingTitleEl = document.getElementById('craftingTitle');
@@ -2342,6 +2759,7 @@ function initUI() {
   const craftingResultIconEl = document.getElementById('craftingResultIcon');
   const craftingCraftBtn = document.getElementById('craftingCraftBtn');
   const craftingInvShelfEl = document.getElementById('craftingInvShelf');
+  const craftingGearShelfEl = document.getElementById('craftingGearShelf');
   const recipeListEl = document.getElementById('recipeList');
 
   const TIER_LABEL = { hand: 'Crafting (2x2)', table: 'Crafting Table (3x3)', large: 'Large Crafting Table (4x4)' };
@@ -2367,6 +2785,7 @@ function initUI() {
           craftingGrid.tapCell(r, c);
           renderCraftingGrid();
           renderCraftingShelf();
+          renderCraftingGearShelf();
         });
         craftingGridEl.appendChild(cellEl);
       }
@@ -2387,10 +2806,12 @@ function initUI() {
     craftingInvShelfEl.innerHTML = '';
     // One shelf entry per distinct item type currently in inventory (showing
     // what's left after subtracting whatever's already placed in the grid).
+    // Tools and armor aren't craft ingredients — they live in the separate
+    // Gear shelf below with equip/unequip controls instead.
     const seen = new Set();
     const entries = [];
     inventory.forEach(entry => {
-      if (!seen.has(entry.item) && TOOL_DEFS[entry.item] === undefined) {
+      if (!seen.has(entry.item) && TOOL_DEFS[entry.item] === undefined && ARMOR_DEFS[entry.item] === undefined) {
         seen.add(entry.item);
         entries.push(entry.item);
       }
@@ -2415,8 +2836,55 @@ function initUI() {
         if (available <= 0) return;
         craftingGrid.selectShelfItem(item);
         renderCraftingShelf();
+        renderCraftingGearShelf();
       });
       craftingInvShelfEl.appendChild(el);
+    });
+  }
+
+  // Tools & armor pieces are each their own inventory entry (they carry
+  // durability), so unlike stackable materials we show one card per entry,
+  // not grouped by item id — equip/wield state is per physical item.
+  function renderCraftingGearShelf() {
+    craftingGearShelfEl.innerHTML = '';
+    const heldIdx = getHeldToolIndex();
+    const gearEntries = [];
+    inventory.forEach((entry, idx) => {
+      if (TOOL_DEFS[entry.item] !== undefined || ARMOR_DEFS[entry.item] !== undefined) {
+        gearEntries.push({ entry, idx });
+      }
+    });
+
+    if (gearEntries.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'shelfEmpty';
+      empty.textContent = 'No tools or armor yet — craft some above.';
+      craftingGearShelfEl.appendChild(empty);
+      return;
+    }
+
+    gearEntries.forEach(({ entry, idx }) => {
+      const isTool = TOOL_DEFS[entry.item] !== undefined;
+      const isArmorPiece = ARMOR_DEFS[entry.item] !== undefined;
+      const isEquipped = isTool ? heldIdx === idx : (isArmorPiece && equippedArmorIndex[ARMOR_DEFS[entry.item].slot] === idx);
+
+      const el = document.createElement('div');
+      el.className = 'gearItem' + (isEquipped ? ' activeSelect' : '');
+      const pct = Math.max(0, Math.min(100, (entry.durability / entry.maxDurability) * 100));
+      const barColor = (entry.durability / entry.maxDurability) > 0.3 ? '#4CAF50' : '#FF5252';
+      el.innerHTML = '<div class="cellLabel">' + itemDisplayLabel(entry.item) + (isEquipped ? ' ✓' : '') + '</div>' +
+        '<div class="gearDurBar"><div class="gearDurFill" style="background:' + barColor + ';width:' + pct + '%"></div></div>';
+      el.addEventListener('click', () => {
+        if (isTool) {
+          equipTool(isEquipped ? null : idx);
+        } else if (isArmorPiece) {
+          const slot = ARMOR_DEFS[entry.item].slot;
+          if (isEquipped) unequipArmor(slot);
+          else equipArmor(idx);
+        }
+        renderCraftingGearShelf();
+      });
+      craftingGearShelfEl.appendChild(el);
     });
   }
 
@@ -2424,6 +2892,7 @@ function initUI() {
     craftingGrid.craft();
     renderCraftingGrid();
     renderCraftingShelf();
+    renderCraftingGearShelf();
   });
 
   function renderRecipes() {
@@ -2483,6 +2952,7 @@ function initUI() {
         }
         renderCraftingGrid();
         renderCraftingShelf();
+        renderCraftingGearShelf();
       });
       recipeListEl.appendChild(row);
     });
@@ -2493,6 +2963,7 @@ function initUI() {
     if (open) {
       renderCraftingGrid();
       renderCraftingShelf();
+      renderCraftingGearShelf();
       renderRecipes();
     }
   }
@@ -2502,6 +2973,7 @@ function initUI() {
     if (craftingOpen) {
       renderCraftingGrid();
       renderCraftingShelf();
+      renderCraftingGearShelf();
       renderRecipes();
     }
   });
@@ -2518,6 +2990,7 @@ function initGame(canvas) {
   const renderer = new GameRenderer(canvas);
   const input = new InputManager();
   const player = new Player(renderer.camera, canvas, input);
+  window.__voxelPlayer = player; // bridge so the death-screen Respawn button can teleport the player
   const dayNight = new DayNightCycle(renderer.scene, renderer.ambientLight, renderer.sunLight, renderer.camera);
 
   const cleanupMobile = setupMobileControls(input);
@@ -2564,9 +3037,32 @@ function initGame(canvas) {
         // teleporting straight into the inventory — the player has to walk
         // over and pick it up.
         if (result.droppedItem) spawnGroundItem(result.droppedItem, 1, result.pos);
+        if (result.bonusDrop) spawnGroundItem(result.bonusDrop, 1, result.pos);
       }
     } else {
       updateMining(false, null, '', delta);
+    }
+
+    // Hunger drain / starvation damage / passive regen tick.
+    updatePlayerStats(delta, !!(player.isMovingInput || input.isHoldingMine));
+
+    // Death & respawn handling.
+    if (getIsDead()) {
+      if (input.keys['KeyR'] || input.respawnTriggered) {
+        respawnPlayer();
+        player.respawn();
+      }
+    }
+
+    // Eat food (G key / mobile Eat button) — eats the currently selected
+    // hotbar item if it's edible.
+    if (input.eatTriggered) {
+      const hotbarBlocks = getHotbarBlockStacks();
+      const selectedItem = hotbarBlocks[currentSelectedBlockIndex];
+      if (selectedItem && FOOD_DEFS[selectedItem]) {
+        const idx = inventory.findIndex(i => i.item === selectedItem);
+        if (idx !== -1) eatFood(idx);
+      }
     }
 
     // Proximity pickup of ground items.
@@ -2586,7 +3082,9 @@ function initGame(canvas) {
         const hotbarBlocks = getHotbarBlockStacks();
         const blockType = hotbarBlocks[currentSelectedBlockIndex];
         // Placing consumes one unit from inventory — no infinite free blocks.
-        if (blockType && hasItem(blockType, 1)) {
+        // Food items are selectable in the hotbar (to eat) but aren't
+        // placeable, so skip them here.
+        if (blockType && isPlaceableBlock(blockType) && hasItem(blockType, 1)) {
           setBlock(placePos.x, placePos.y, placePos.z, blockType);
           removeItem(blockType, 1);
           renderer.rebuildMeshes();
@@ -2647,6 +3145,58 @@ function initGame(canvas) {
 /* =========================================================================
    BOOTSTRAP  (ported from App.tsx / main.tsx)
    ========================================================================= */
+/* =========================================================================
+   LANDSCAPE LOCK
+   Mobile browsers won't force rotation without a user gesture, so: show a
+   rotate-prompt overlay whenever the viewport is currently portrait, and on
+   the first tap try to go fullscreen + lock orientation to landscape. Falls
+   back gracefully (just hides the prompt once actually landscape) on
+   browsers/devices that don't support the Fullscreen or Orientation APIs
+   (notably iOS Safari, which supports neither).
+   ========================================================================= */
+function setupLandscapeLock() {
+  const isTouch = 'ontouchstart' in window;
+  if (!isTouch) return; // desktop doesn't need this
+
+  const rotatePromptEl = document.getElementById('rotatePrompt');
+
+  function isPortrait() {
+    if (screen.orientation && typeof screen.orientation.type === 'string') {
+      return screen.orientation.type.indexOf('portrait') === 0;
+    }
+    return window.innerHeight > window.innerWidth;
+  }
+
+  function refreshPromptVisibility() {
+    rotatePromptEl.style.display = isPortrait() ? 'flex' : 'none';
+  }
+
+  async function tryLockLandscape() {
+    try {
+      const rootEl = document.documentElement;
+      if (rootEl.requestFullscreen && !document.fullscreenElement) {
+        await rootEl.requestFullscreen().catch(() => {});
+      } else if (rootEl.webkitRequestFullscreen && !document.webkitFullscreenElement) {
+        rootEl.webkitRequestFullscreen();
+      }
+      if (screen.orientation && screen.orientation.lock) {
+        await screen.orientation.lock('landscape').catch(() => {});
+      }
+    } catch (e) {
+      // Unsupported (e.g. iOS Safari) — the rotate-prompt overlay is the fallback.
+    }
+    refreshPromptVisibility();
+  }
+
+  rotatePromptEl.addEventListener('click', tryLockLandscape);
+  rotatePromptEl.addEventListener('touchstart', tryLockLandscape, { passive: true });
+  window.addEventListener('resize', refreshPromptVisibility);
+  window.addEventListener('orientationchange', refreshPromptVisibility);
+  if (screen.orientation) screen.orientation.addEventListener('change', refreshPromptVisibility);
+
+  refreshPromptVisibility();
+}
+
 function boot() {
   const canvas = document.getElementById('gameCanvas');
   const webglErrorEl = document.getElementById('webglError');
@@ -2666,6 +3216,7 @@ function boot() {
     return;
   }
 
+  setupLandscapeLock();
   initUI();
 
   try {
@@ -2683,6 +3234,6 @@ if (document.readyState === 'loading') {
 }
 
 })();
-</script></script>
+</script>
 </body>
 </html>
