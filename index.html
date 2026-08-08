@@ -101,88 +101,121 @@
   #armorSlotsRow .slot { width: 30px; height: 30px; }
 
   #craftingPanel {
-    position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.85);
+    position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.75);
     display: none; flex-direction: column; align-items: center; justify-content: center;
-    color: #fff; font-family: sans-serif;
+    color: #2b2b2b; font-family: sans-serif;
   }
   #craftingBox {
-    width: 780px; max-width: 94%; max-height: 92%; background: #1E1E1E; border-radius: 12px;
-    padding: 24px; display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-    border: 1px solid #333; overflow: hidden;
+    width: 920px; max-width: 96%; max-height: 94%; background: #c6c6c6; border-radius: 14px;
+    padding: 20px 24px; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    border: 3px solid #8a8a8a; overflow-y: auto;
   }
-  #craftingHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  #craftingHeader h2 { margin: 0; font-size: 24px; font-weight: bold; }
-  #craftingClose { background: none; border: none; color: #888; cursor: pointer; font-size: 18px; }
-  #craftingHint { font-size: 13px; color: #aaa; margin-bottom: 16px; }
+  #craftingHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  #craftingHeader h2 { margin: 0; font-size: 20px; font-weight: bold; letter-spacing: 1px; }
+  #craftingClose {
+    background: #9a9a9a; border: 2px solid #6e6e6e; color: #2b2b2b; cursor: pointer; font-size: 15px;
+    width: 26px; height: 26px; border-radius: 4px; line-height: 1;
+  }
+  #craftingHint { font-size: 11px; color: #555; margin-bottom: 14px; }
 
-  #craftingMain { display: flex; gap: 24px; margin-bottom: 16px; }
-  #craftingGridArea { display: flex; align-items: center; gap: 16px; }
-  #craftingGrid {
-    display: grid; gap: 4px; background: #141414; padding: 8px; border-radius: 8px; border: 1px solid #333;
+  /* --- Top row: armor | preview | crafting+offhand --- */
+  #craftingTopRow { display: flex; gap: 16px; margin-bottom: 14px; align-items: flex-start; flex-wrap: wrap; }
+
+  #armorColumn { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  #armorColumnLabel { font-size: 12px; font-weight: bold; letter-spacing: 1px; margin-bottom: 2px; }
+  #armorSlotsCol { display: flex; flex-direction: column; gap: 3px; }
+
+  #previewBox {
+    width: 150px; min-height: 190px; background: #0a0a0a; border-radius: 4px;
+    border: 2px solid #6e6e6e; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 10px; gap: 6px; color: #aaa;
   }
+  #previewLabel { font-size: 10px; color: #777; text-transform: uppercase; letter-spacing: 1px; }
+  #previewIcon { width: 56px; height: 56px; border-radius: 4px; border: 2px solid #444; display: flex; align-items: center; justify-content: center; color: #888; font-size: 22px; }
+  #previewName { font-size: 11px; text-transform: capitalize; text-align: center; color: #ddd; }
+  #previewDurWrap { width: 80%; }
+  #previewDurBar { height: 5px; background: #222; border-radius: 2px; overflow: hidden; }
+  #previewDurFill { height: 100%; background: #4CAF50; }
+
+  #craftingRightCol { flex: 1; min-width: 300px; }
+  #craftingTierLabel { font-size: 14px; font-weight: bold; letter-spacing: 1px; margin-bottom: 8px; }
+  #craftingGridArea { display: flex; align-items: center; gap: 16px; }
+  #craftingGrid { display: grid; gap: 4px; }
   .craftCell {
-    width: 52px; height: 52px; background: #2A2A2A; border: 2px solid #3d3d3d; border-radius: 6px;
+    width: 46px; height: 46px; background: #8f8f8f; border: 2px solid #5c5c5c; border-radius: 3px;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     cursor: pointer; position: relative; text-align: center; padding: 2px;
+    box-shadow: inset -2px -2px 0 rgba(0,0,0,0.2), inset 2px 2px 0 rgba(255,255,255,0.15);
   }
   .craftCell.filled { border-color: #4CAF50; }
-  .craftCell .cellLabel { font-size: 8px; color: #ddd; text-transform: capitalize; line-height: 1.1; }
-  .craftCell .cellCount { position: absolute; bottom: 2px; right: 4px; font-size: 10px; font-weight: bold; color: #fff; text-shadow: 1px 1px 1px #000; }
-  #craftingArrow { font-size: 28px; color: #888; }
-  #craftingResultSlot { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .craftCell .cellLabel { font-size: 7px; color: #222; text-transform: capitalize; line-height: 1.1; font-weight: bold; }
+  .craftCell .cellCount { position: absolute; bottom: 1px; right: 3px; font-size: 10px; font-weight: bold; color: #fff; text-shadow: 1px 1px 1px #000; }
+  #craftingArrow { font-size: 26px; color: #777; }
+  #craftingResultSlot { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   #craftingResultIcon {
-    width: 60px; height: 60px; background: #2A2A2A; border: 2px solid #444; border-radius: 8px;
-    display: flex; align-items: center; justify-content: center; font-size: 11px; text-align: center;
-    text-transform: capitalize; padding: 4px;
+    width: 52px; height: 52px; background: #8f8f8f; border: 2px solid #5c5c5c; border-radius: 3px;
+    display: flex; align-items: center; justify-content: center; font-size: 9px; text-align: center;
+    text-transform: capitalize; padding: 3px; font-weight: bold; color: #222;
+    box-shadow: inset -2px -2px 0 rgba(0,0,0,0.2), inset 2px 2px 0 rgba(255,255,255,0.15);
   }
   #craftingCraftBtn {
-    border: none; padding: 8px 18px; border-radius: 6px; font-weight: bold; background: #4CAF50; color: #fff; cursor: pointer;
+    border: 2px solid #3d7a3d; padding: 6px 16px; border-radius: 5px; font-weight: bold; background: #5cb85c; color: #fff; cursor: pointer;
   }
-  #craftingCraftBtn:disabled { background: #444; color: #888; cursor: not-allowed; }
+  #craftingCraftBtn:disabled { background: #999; border-color: #777; color: #ccc; cursor: not-allowed; }
 
-  #knownRecipesPanel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  #knownRecipesTitle { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-  #recipeList { flex: 1; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  #craftingSecondRow { display: flex; align-items: center; gap: 18px; margin-top: 14px; }
+  #recipeBookBtn {
+    width: 46px; height: 46px; background: #8f8f8f; border: 2px solid #5c5c5c; border-radius: 6px;
+    font-size: 20px; cursor: pointer; box-shadow: inset -2px -2px 0 rgba(0,0,0,0.2), inset 2px 2px 0 rgba(255,255,255,0.15);
+  }
+  #offHandArea { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  #offHandLabel { font-size: 10px; font-weight: bold; letter-spacing: 1px; color: #444; }
+
+  #knownRecipesPanel {
+    display: none; flex-direction: column; background: #b5b5b5; border: 2px solid #8a8a8a; border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 14px; max-height: 220px;
+  }
+  #knownRecipesPanel.open { display: flex; }
+  #knownRecipesTitle { font-size: 12px; color: #444; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+  #knownRecipesTitle button { background: none; border: none; color: #444; cursor: pointer; font-size: 13px; }
+  #recipeList { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
   .recipeRow {
-    display: flex; align-items: center; justify-content: space-between; background: #2A2A2A;
-    padding: 8px 12px; border-radius: 8px; border: 1px solid #444; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between; background: #cfcfcf;
+    padding: 6px 10px; border-radius: 6px; border: 1px solid #999; cursor: pointer;
   }
   .recipeRow:hover { border-color: #666; }
-  .recipeRow .label { font-weight: bold; font-size: 14px; margin-bottom: 2px; }
-  .recipeRow .ings { font-size: 11px; color: #aaa; display: flex; gap: 6px; flex-wrap: wrap; }
-  .recipeRow .ings span.missing { color: #FF6B6B; }
-  .recipeRow .tierTag { font-size: 10px; color: #888; text-transform: uppercase; margin-left: 8px; }
-  .recipeRow button {
-    border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 12px;
-  }
-  .recipeRow button.can { background: #4CAF50; color: #fff; cursor: pointer; opacity: 1; }
-  .recipeRow button.cannot { background: #444; color: #888; cursor: not-allowed; opacity: 0.5; }
+  .recipeRow .label { font-weight: bold; font-size: 13px; margin-bottom: 2px; color: #222; }
+  .recipeRow .ings { font-size: 10px; color: #555; display: flex; gap: 6px; flex-wrap: wrap; }
+  .recipeRow .ings span.missing { color: #c0392b; }
+  .recipeRow .tierTag { font-size: 9px; color: #777; text-transform: uppercase; margin-left: 8px; }
+  .recipeRow button { border: none; padding: 5px 10px; border-radius: 5px; font-weight: bold; font-size: 11px; }
+  .recipeRow button.can { background: #5cb85c; color: #fff; cursor: pointer; opacity: 1; }
+  .recipeRow button.cannot { background: #999; color: #ddd; cursor: not-allowed; opacity: 0.6; }
 
-  #craftingInvTitle { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-  #craftingInvShelf {
-    display: flex; flex-wrap: wrap; gap: 6px; overflow-y: auto; max-height: 130px;
-    border-top: 1px solid #333; padding-top: 12px;
+  /* --- Backpack (27) + hotbar (9) grids, Bedrock-style --- */
+  #backpackGrid {
+    display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px;
+    background: #b5b5b5; border: 2px solid #8a8a8a; border-radius: 6px; padding: 8px; margin-bottom: 10px;
   }
-  .shelfItem {
-    width: 52px; height: 52px; background: #2A2A2A; border: 2px solid #3d3d3d; border-radius: 6px;
+  #hotbarLabel { text-align: center; font-size: 11px; font-weight: bold; letter-spacing: 2px; color: #444; margin-bottom: 4px; }
+  #craftingHotbarRow {
+    display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px;
+    background: #b5b5b5; border: 2px solid #8a8a8a; border-radius: 6px; padding: 8px;
+  }
+  .invCell {
+    aspect-ratio: 1; background: #8f8f8f; border: 2px solid #5c5c5c; border-radius: 3px;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    cursor: pointer; position: relative; text-align: center; padding: 2px;
+    cursor: pointer; position: relative; padding: 2px; min-width: 0;
+    box-shadow: inset -2px -2px 0 rgba(0,0,0,0.2), inset 2px 2px 0 rgba(255,255,255,0.15);
   }
-  .shelfItem.activeSelect { border-color: #FFC107; }
-  .shelfItem .cellLabel { font-size: 8px; color: #ddd; text-transform: capitalize; line-height: 1.1; }
-  .shelfItem .cellCount { position: absolute; bottom: 2px; right: 4px; font-size: 10px; font-weight: bold; color: #fff; text-shadow: 1px 1px 1px #000; }
-  #craftingInvShelf .shelfEmpty { color: #666; font-size: 13px; padding: 8px; }
-  #craftingGearTitle { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin: 12px 0 8px; }
-  #craftingGearShelf { display: flex; flex-wrap: wrap; gap: 6px; overflow-y: auto; max-height: 110px; }
-  .gearItem {
-    width: 60px; height: 60px; background: #2A2A2A; border: 2px solid #3d3d3d; border-radius: 6px;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    cursor: pointer; position: relative; text-align: center; padding: 2px;
-  }
-  .gearItem.activeSelect { border-color: #FFD54F; box-shadow: 0 0 0 1px #FFD54F; }
-  .gearItem .cellLabel { font-size: 8px; color: #ddd; text-transform: capitalize; line-height: 1.1; }
-  .gearItem .gearDurBar { width: 90%; height: 4px; background: #111; border-radius: 2px; margin-top: 3px; overflow: hidden; }
-  .gearItem .gearDurFill { height: 100%; }
+  .invCell.empty { cursor: default; }
+  .invCell.equipped { border-color: #FFD54F; box-shadow: inset 0 0 0 1px #FFD54F; }
+  .invCell.activeSelect { border-color: #4CAF50; box-shadow: inset 0 0 0 1px #4CAF50; }
+  .invCell .swatch { width: 62%; aspect-ratio: 1; border-radius: 2px; border: 1px solid rgba(0,0,0,0.4); }
+  .invCell .cellLabel { font-size: 7px; color: #222; text-transform: capitalize; line-height: 1; font-weight: bold; text-align: center; }
+  .invCell .cellCount { position: absolute; bottom: 1px; right: 2px; font-size: 9px; font-weight: bold; color: #fff; text-shadow: 1px 1px 1px #000; }
+  .invCell .durBarMini { position: absolute; bottom: 2px; left: 3px; right: 3px; height: 2px; background: rgba(0,0,0,0.4); border-radius: 1px; }
+  .invCell .durBarMini .fill { height: 100%; }
 </style>
 </head>
 <body>
@@ -209,32 +242,54 @@
   <div id="craftingPanel">
     <div id="craftingBox">
       <div id="craftingHeader">
-        <h2 id="craftingTitle">Crafting</h2>
+        <h2 id="craftingTitle">Inventory</h2>
         <button id="craftingClose">&#10005;</button>
       </div>
-      <div id="craftingHint">Press E to close &nbsp;|&nbsp; Tap an item below, then tap a grid cell to place it. Tap a filled cell to return it.</div>
+      <div id="craftingHint">Press E to close &nbsp;|&nbsp; Tap an item, then tap a crafting cell to place it &nbsp;|&nbsp; Tap armor/tools to equip</div>
 
-      <div id="craftingMain">
-        <div id="craftingGridArea">
-          <div id="craftingGrid"></div>
-          <div id="craftingArrow">&#8594;</div>
-          <div id="craftingResultSlot">
-            <div id="craftingResultIcon">?</div>
-            <button id="craftingCraftBtn" disabled>Craft</button>
-          </div>
+      <div id="craftingTopRow">
+        <div id="armorColumn">
+          <div id="armorColumnLabel">ARMOR</div>
+          <div id="armorSlotsCol"></div>
         </div>
 
-        <div id="knownRecipesPanel">
-          <div id="knownRecipesTitle">Known Recipes</div>
-          <div id="recipeList"></div>
+        <div id="previewBox">
+          <div id="previewLabel">Selected</div>
+          <div id="previewIcon">?</div>
+          <div id="previewName"></div>
+          <div id="previewDurWrap"><div id="previewDurBar"><div id="previewDurFill"></div></div></div>
+        </div>
+
+        <div id="craftingRightCol">
+          <div id="craftingTierLabel">CRAFTING</div>
+          <div id="craftingGridArea">
+            <div id="craftingGrid"></div>
+            <div id="craftingArrow">&#8594;</div>
+            <div id="craftingResultSlot">
+              <div id="craftingResultIcon">?</div>
+              <button id="craftingCraftBtn" disabled>Craft</button>
+            </div>
+          </div>
+
+          <div id="craftingSecondRow">
+            <button id="recipeBookBtn" title="Known Recipes">&#128214;</button>
+            <div id="offHandArea">
+              <div id="offHandLabel">OFF HAND</div>
+              <div id="offHandSlot" class="slot empty"></div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div id="craftingInvTitle">Your Items</div>
-      <div id="craftingInvShelf"></div>
+      <div id="knownRecipesPanel">
+        <div id="knownRecipesTitle">Known Recipes <button id="knownRecipesClose">&#10005;</button></div>
+        <div id="recipeList"></div>
+      </div>
 
-      <div id="craftingGearTitle">Your Gear &nbsp;<span style="color:#888;font-weight:normal;">(tap a tool to wield it, tap armor to wear it)</span></div>
-      <div id="craftingGearShelf"></div>
+      <div id="backpackGrid"></div>
+
+      <div id="hotbarLabel">&middot; HOTBAR &middot;</div>
+      <div id="craftingHotbarRow"></div>
     </div>
   </div>
 
@@ -1606,7 +1661,11 @@ class Player {
 
     if (!input.isTouch) {
       domElement.addEventListener('click', () => {
-        if (!this.controls.isLocked) this.controls.lock();
+        // Don't re-grab the mouse while a menu is up (crafting panel) or the
+        // player is dead — otherwise a click meant for a button ends up
+        // re-locking the pointer and the game silently eats the next clicks
+        // as "look around" instead of a UI interaction.
+        if (!this.controls.isLocked && !getIsDead() && !craftingOpen) this.controls.lock();
       });
     }
   }
@@ -2675,7 +2734,14 @@ function initUI() {
   const deathScreenEl = document.getElementById('deathScreen');
   const respawnBtnEl = document.getElementById('respawnBtn');
   function renderDeathScreen() {
-    deathScreenEl.style.display = getIsDead() ? 'flex' : 'none';
+    const dead = getIsDead();
+    deathScreenEl.style.display = dead ? 'flex' : 'none';
+    // Release the mouse the instant the player dies so the death screen's
+    // Respawn button is actually clickable instead of being swallowed as a
+    // "look around" drag, and so the cursor is visible again.
+    if (dead && document.pointerLockElement) {
+      document.exitPointerLock();
+    }
   }
   subscribeStats(renderDeathScreen);
   renderDeathScreen();
@@ -2748,29 +2814,74 @@ function initUI() {
 
   // --- Held tool indicator + tracked materials chips removed in favor of
   // the Bedrock-style hotbar/armor rows above; tools are equipped from the
-  // crafting panel's item shelf (tap a tool there to wield/unwield it). ---
+  // crafting panel's inventory grid (tap a tool/armor cell to wield/wear it). ---
 
-  // --- Crafting panel ---
+  // --- Crafting / Inventory panel ---
 
   const craftingPanel = document.getElementById('craftingPanel');
   const craftingCloseBtn = document.getElementById('craftingClose');
   const craftingTitleEl = document.getElementById('craftingTitle');
+  const craftingTierLabelEl = document.getElementById('craftingTierLabel');
   const craftingGridEl = document.getElementById('craftingGrid');
   const craftingResultIconEl = document.getElementById('craftingResultIcon');
   const craftingCraftBtn = document.getElementById('craftingCraftBtn');
-  const craftingInvShelfEl = document.getElementById('craftingInvShelf');
-  const craftingGearShelfEl = document.getElementById('craftingGearShelf');
+  const armorSlotsColEl = document.getElementById('armorSlotsCol');
+  const backpackGridEl = document.getElementById('backpackGrid');
+  const craftingHotbarRowEl = document.getElementById('craftingHotbarRow');
+  const previewIconEl = document.getElementById('previewIcon');
+  const previewNameEl = document.getElementById('previewName');
+  const previewDurWrapEl = document.getElementById('previewDurWrap');
+  const previewDurFillEl = document.getElementById('previewDurFill');
+  const recipeBookBtn = document.getElementById('recipeBookBtn');
+  const knownRecipesPanelEl = document.getElementById('knownRecipesPanel');
+  const knownRecipesCloseBtn = document.getElementById('knownRecipesClose');
   const recipeListEl = document.getElementById('recipeList');
 
-  const TIER_LABEL = { hand: 'Crafting (2x2)', table: 'Crafting Table (3x3)', large: 'Large Crafting Table (4x4)' };
+  const TIER_LABEL = { hand: 'CRAFTING', table: 'CRAFTING TABLE', large: 'LARGE CRAFTING TABLE' };
+  const ARMOR_ICON_GLYPH = { helmet: '\u{1F4E7}', chest: '\u{1F455}', legs: '\u{1F456}', boots: '\u{1F462}' };
 
   function itemDisplayLabel(item) {
     return item.replace(/_/g, ' ');
   }
+  function itemSwatchColor(item) {
+    if (BLOCK_COLORS[item]) return BLOCK_COLORS[item].side;
+    if (FOOD_DEFS[item]) return '#c98a3f';
+    if (TOOL_DEFS[item]) return '#b0b0b0';
+    if (ARMOR_DEFS[item]) return '#9aa0a6';
+    return '#777';
+  }
+
+  let previewSelection = null; // { kind: 'item'|'invIndex', item, idx }
+  function setPreview(item, invIndex) {
+    previewSelection = { item, idx: invIndex };
+    renderPreview();
+  }
+  function renderPreview() {
+    if (!previewSelection) {
+      previewIconEl.innerHTML = '?';
+      previewIconEl.style.background = 'none';
+      previewNameEl.textContent = '';
+      previewDurWrapEl.style.display = 'none';
+      return;
+    }
+    previewIconEl.innerHTML = '';
+    previewIconEl.style.background = itemSwatchColor(previewSelection.item);
+    previewNameEl.textContent = itemDisplayLabel(previewSelection.item);
+    const entry = previewSelection.idx !== undefined ? inventory[previewSelection.idx] : null;
+    if (entry && entry.maxDurability) {
+      previewDurWrapEl.style.display = 'block';
+      const pct = Math.max(0, Math.min(100, (entry.durability / entry.maxDurability) * 100));
+      previewDurFillEl.style.width = pct + '%';
+      previewDurFillEl.style.background = pct > 30 ? '#4CAF50' : '#FF5252';
+    } else {
+      previewDurWrapEl.style.display = 'none';
+    }
+  }
 
   function renderCraftingGrid() {
-    craftingTitleEl.textContent = TIER_LABEL[craftingGrid.tier] || 'Crafting';
-    craftingGridEl.style.gridTemplateColumns = 'repeat(' + craftingGrid.size + ', 52px)';
+    craftingTitleEl.textContent = 'Inventory';
+    craftingTierLabelEl.textContent = TIER_LABEL[craftingGrid.tier] || 'CRAFTING';
+    craftingGridEl.style.gridTemplateColumns = 'repeat(' + craftingGrid.size + ', 46px)';
     craftingGridEl.innerHTML = '';
 
     for (let r = 0; r < craftingGrid.size; r++) {
@@ -2780,12 +2891,11 @@ function initUI() {
         cellEl.className = 'craftCell' + (cellVal ? ' filled' : '');
         if (cellVal) {
           cellEl.innerHTML = '<div class="cellLabel">' + itemDisplayLabel(cellVal) + '</div>';
+          cellEl.style.background = cellVal ? itemSwatchColor(cellVal) : '';
         }
         cellEl.addEventListener('click', () => {
           craftingGrid.tapCell(r, c);
-          renderCraftingGrid();
-          renderCraftingShelf();
-          renderCraftingGearShelf();
+          renderAll();
         });
         craftingGridEl.appendChild(cellEl);
       }
@@ -2802,97 +2912,90 @@ function initUI() {
     }
   }
 
-  function renderCraftingShelf() {
-    craftingInvShelfEl.innerHTML = '';
-    // One shelf entry per distinct item type currently in inventory (showing
-    // what's left after subtracting whatever's already placed in the grid).
-    // Tools and armor aren't craft ingredients — they live in the separate
-    // Gear shelf below with equip/unequip controls instead.
-    const seen = new Set();
-    const entries = [];
-    inventory.forEach(entry => {
-      if (!seen.has(entry.item) && TOOL_DEFS[entry.item] === undefined && ARMOR_DEFS[entry.item] === undefined) {
-        seen.add(entry.item);
-        entries.push(entry.item);
-      }
-    });
-
-    if (entries.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'shelfEmpty';
-      empty.textContent = 'Nothing to craft with yet — go mine something.';
-      craftingInvShelfEl.appendChild(empty);
-      return;
-    }
-
-    entries.forEach(item => {
-      const available = craftingGrid.availableCount(item);
+  // --- Armor column (4 fixed slots, tap to unequip; tap an inventory armor
+  // cell to equip into the matching slot) ---
+  function renderArmorColumnCraftingPanel() {
+    armorSlotsColEl.innerHTML = '';
+    ARMOR_SLOTS.forEach(slot => {
+      const idx = equippedArmorIndex[slot];
+      const piece = idx !== null ? inventory[idx] : null;
       const el = document.createElement('div');
-      el.className = 'shelfItem' + (craftingGrid.selectedShelfItem === item ? ' activeSelect' : '');
-      el.innerHTML = '<div class="cellLabel">' + itemDisplayLabel(item) + '</div>' +
-        '<div class="cellCount">' + available + '</div>';
-      if (available <= 0) el.style.opacity = '0.35';
-      el.addEventListener('click', () => {
-        if (available <= 0) return;
-        craftingGrid.selectShelfItem(item);
-        renderCraftingShelf();
-        renderCraftingGearShelf();
-      });
-      craftingInvShelfEl.appendChild(el);
+      el.className = 'invCell' + (piece ? ' equipped' : ' empty');
+      el.style.width = '46px'; el.style.height = '46px';
+      if (piece) {
+        const pct = Math.max(0, Math.min(100, (piece.durability / piece.maxDurability) * 100));
+        el.innerHTML = '<div class="swatch" style="background:' + itemSwatchColor(piece.item) + ';display:flex;align-items:center;justify-content:center;font-size:16px;">' + ARMOR_ICON_GLYPH[slot] + '</div>' +
+          '<div class="durBarMini"><div class="fill" style="background:' + (pct > 30 ? '#4CAF50' : '#FF5252') + ';width:' + pct + '%"></div></div>';
+        el.addEventListener('click', () => { unequipArmor(slot); renderAll(); });
+      } else {
+        el.innerHTML = '<div style="font-size:16px;opacity:0.3;">' + ARMOR_ICON_GLYPH[slot] + '</div>';
+      }
+      armorSlotsColEl.appendChild(el);
     });
   }
 
-  // Tools & armor pieces are each their own inventory entry (they carry
-  // durability), so unlike stackable materials we show one card per entry,
-  // not grouped by item id — equip/wield state is per physical item.
-  function renderCraftingGearShelf() {
-    craftingGearShelfEl.innerHTML = '';
-    const heldIdx = getHeldToolIndex();
-    const gearEntries = [];
-    inventory.forEach((entry, idx) => {
-      if (TOOL_DEFS[entry.item] !== undefined || ARMOR_DEFS[entry.item] !== undefined) {
-        gearEntries.push({ entry, idx });
-      }
-    });
-
-    if (gearEntries.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'shelfEmpty';
-      empty.textContent = 'No tools or armor yet — craft some above.';
-      craftingGearShelfEl.appendChild(empty);
-      return;
+  // --- Unified inventory grid (backpack 27 + hotbar 9), Bedrock-style ---
+  // The underlying `inventory` array is still just a compacting list (no
+  // fixed slot indices), so we lay its entries out left-to-right into the
+  // 27-cell backpack grid, then the 9-cell hotbar row below it — matching
+  // how the in-world hotbar already derives its slots from inventory order.
+  function makeInvCell(entry, invIndex) {
+    const el = document.createElement('div');
+    if (!entry) {
+      el.className = 'invCell empty';
+      return el;
     }
+    const isTool = TOOL_DEFS[entry.item] !== undefined;
+    const isArmorPiece = ARMOR_DEFS[entry.item] !== undefined;
+    const isEquippedTool = isTool && getHeldToolIndex() === invIndex;
+    const isEquippedArmor = isArmorPiece && equippedArmorIndex[ARMOR_DEFS[entry.item].slot] === invIndex;
+    const isSelectedForCraft = !isTool && !isArmorPiece && craftingGrid.selectedShelfItem === entry.item;
 
-    gearEntries.forEach(({ entry, idx }) => {
-      const isTool = TOOL_DEFS[entry.item] !== undefined;
-      const isArmorPiece = ARMOR_DEFS[entry.item] !== undefined;
-      const isEquipped = isTool ? heldIdx === idx : (isArmorPiece && equippedArmorIndex[ARMOR_DEFS[entry.item].slot] === idx);
-
-      const el = document.createElement('div');
-      el.className = 'gearItem' + (isEquipped ? ' activeSelect' : '');
+    el.className = 'invCell' + (isEquippedTool || isEquippedArmor ? ' equipped' : '') + (isSelectedForCraft ? ' activeSelect' : '');
+    el.innerHTML = '<div class="swatch" style="background:' + itemSwatchColor(entry.item) + ';"></div>' +
+      '<div class="cellCount">' + (entry.count > 1 ? entry.count : '') + '</div>';
+    if (entry.maxDurability) {
       const pct = Math.max(0, Math.min(100, (entry.durability / entry.maxDurability) * 100));
-      const barColor = (entry.durability / entry.maxDurability) > 0.3 ? '#4CAF50' : '#FF5252';
-      el.innerHTML = '<div class="cellLabel">' + itemDisplayLabel(entry.item) + (isEquipped ? ' ✓' : '') + '</div>' +
-        '<div class="gearDurBar"><div class="gearDurFill" style="background:' + barColor + ';width:' + pct + '%"></div></div>';
-      el.addEventListener('click', () => {
-        if (isTool) {
-          equipTool(isEquipped ? null : idx);
-        } else if (isArmorPiece) {
-          const slot = ARMOR_DEFS[entry.item].slot;
-          if (isEquipped) unequipArmor(slot);
-          else equipArmor(idx);
-        }
-        renderCraftingGearShelf();
-      });
-      craftingGearShelfEl.appendChild(el);
+      el.innerHTML += '<div class="durBarMini"><div class="fill" style="background:' + (pct > 30 ? '#4CAF50' : '#FF5252') + ';width:' + pct + '%"></div></div>';
+    }
+    el.title = itemDisplayLabel(entry.item);
+    el.addEventListener('click', () => {
+      setPreview(entry.item, invIndex);
+      if (isTool) {
+        equipTool(isEquippedTool ? null : invIndex);
+      } else if (isArmorPiece) {
+        const slot = ARMOR_DEFS[entry.item].slot;
+        if (isEquippedArmor) unequipArmor(slot);
+        else equipArmor(invIndex);
+      } else {
+        // Stackable material: select it for crafting-grid placement (same
+        // click-to-select, click-a-grid-cell-to-place flow as before).
+        craftingGrid.selectShelfItem(entry.item);
+      }
+      renderAll();
     });
+    return el;
+  }
+
+  function renderInventoryGrids() {
+    backpackGridEl.innerHTML = '';
+    craftingHotbarRowEl.innerHTML = '';
+
+    const BACKPACK_SIZE = 27;
+    const HOTBAR_SIZE = 9;
+    const totalSlots = BACKPACK_SIZE + HOTBAR_SIZE;
+
+    for (let i = 0; i < totalSlots; i++) {
+      const entry = inventory[i] || null;
+      const cell = makeInvCell(entry, i);
+      if (i < BACKPACK_SIZE) backpackGridEl.appendChild(cell);
+      else craftingHotbarRowEl.appendChild(cell);
+    }
   }
 
   craftingCraftBtn.addEventListener('click', () => {
     craftingGrid.craft();
-    renderCraftingGrid();
-    renderCraftingShelf();
-    renderCraftingGearShelf();
+    renderAll();
   });
 
   function renderRecipes() {
@@ -2931,6 +3034,7 @@ function initUI() {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         craftItem(recipe.id);
+        renderAll();
       });
 
       row.appendChild(left);
@@ -2950,33 +3054,36 @@ function initUI() {
             }
           }
         }
-        renderCraftingGrid();
-        renderCraftingShelf();
-        renderCraftingGearShelf();
+        renderAll();
       });
       recipeListEl.appendChild(row);
     });
   }
 
+  function renderAll() {
+    renderCraftingGrid();
+    renderArmorColumnCraftingPanel();
+    renderInventoryGrids();
+    renderPreview();
+    if (knownRecipesPanelEl.classList.contains('open')) renderRecipes();
+  }
+
+  recipeBookBtn.addEventListener('click', () => {
+    knownRecipesPanelEl.classList.toggle('open');
+    if (knownRecipesPanelEl.classList.contains('open')) renderRecipes();
+  });
+  knownRecipesCloseBtn.addEventListener('click', () => knownRecipesPanelEl.classList.remove('open'));
+
   function setCraftingVisible(open) {
     craftingPanel.style.display = open ? 'flex' : 'none';
     if (open) {
-      renderCraftingGrid();
-      renderCraftingShelf();
-      renderCraftingGearShelf();
-      renderRecipes();
+      previewSelection = null;
+      renderAll();
     }
   }
 
   subscribeCrafting(setCraftingVisible);
-  subscribeInventory(() => {
-    if (craftingOpen) {
-      renderCraftingGrid();
-      renderCraftingShelf();
-      renderCraftingGearShelf();
-      renderRecipes();
-    }
-  });
+  subscribeInventory(() => { if (craftingOpen) renderAll(); });
   craftingCloseBtn.addEventListener('click', () => setCraftingOpen(false));
   setCraftingVisible(craftingOpen);
 
@@ -3028,7 +3135,7 @@ function initGame(canvas) {
     else renderer.setOutline(null);
 
     const currentBlockType = hit ? getBlock(hit.pos.x, hit.pos.y, hit.pos.z) : undefined;
-    if (currentBlockType && hit && input.isHoldingMine) {
+    if (!getIsDead() && currentBlockType && hit && input.isHoldingMine) {
       const result = updateMining(true, hit, currentBlockType, delta);
       if (result.mined) {
         removeBlock(hit.pos.x, hit.pos.y, hit.pos.z);
@@ -3069,7 +3176,7 @@ function initGame(canvas) {
     updateGroundItems(delta, player.camera.position);
     renderer.syncDrops(groundItems, clock.getElapsedTime());
 
-    if (hit && input.placeTriggered) {
+    if (!getIsDead() && hit && input.placeTriggered) {
       const placePos = hit.pos.clone().add(hit.normal);
       const px = Math.floor(player.camera.position.x + 0.5);
       const py = Math.floor(player.camera.position.y - 1.7 + 0.5);
