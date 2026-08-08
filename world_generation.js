@@ -510,7 +510,98 @@
   }
 
   const chunks = new Map();          // key -> Chunk
-  const worldMap = global.worldMap || new Map(); // "x,y,z" -> blockType (shared with index.html)
+
+  // ShardedBlockMap: drop-in replacement for the flat `Map<"x,y,z", blockType>`
+  // previously used as `worldMap`. Backed by Map<chunkKey, Map<"x,y,z", blockType>>
+  // so an entire chunk's blocks can be discarded with a single outer .delete()
+  // instead of thousands of individual flat-map .delete() calls (the proven
+  // cause of the 900-1800ms unloadChunk() GC/Mark-Compact spikes).
+  //
+  // Exposes the same surface index.html and this file actually use:
+  // .get(key), .set(key,val), .delete(key), .has(key), .clear(), .size.
+  // The full "x,y,z" string key is preserved as-is (both as the argument and
+  // as the inner map's key), so getBlockKey()'s output format is unchanged
+  // and no other code needs to know sharding exists.
+  function createShardedBlockMap(CHUNK_SIZE) {
+    const shards = new Map(); // chunkKey -> Map<"x,y,z", blockType>
+    let liveSize = 0;
+
+    function chunkKeyForCoords(x, z) {
+      const cx = Math.floor(x / CHUNK_SIZE);
+      const cz = Math.floor(z / CHUNK_SIZE);
+      return cx + ',' + cz;
+    }
+
+    // Parses "x,y,z" back into numbers to compute the shard. Runs on every
+    // get/set/delete, so kept allocation-light (no regex, no split()).
+    function parseKeyToCoords(key) {
+      const first = key.indexOf(',');
+      const second = key.indexOf(',', first + 1);
+      const x = Number(key.slice(0, first));
+      const z = Number(key.slice(second + 1));
+      return [x, z];
+    }
+
+    return {
+      get(key) {
+        const [x, z] = parseKeyToCoords(key);
+        const shard = shards.get(chunkKeyForCoords(x, z));
+        return shard ? shard.get(key) : undefined;
+      },
+      set(key, value) {
+        const [x, z] = parseKeyToCoords(key);
+        const ck = chunkKeyForCoords(x, z);
+        let shard = shards.get(ck);
+        if (!shard) {
+          shard = new Map();
+          shards.set(ck, shard);
+        }
+        if (!shard.has(key)) liveSize++;
+        shard.set(key, value);
+        return this;
+      },
+      delete(key) {
+        const [x, z] = parseKeyToCoords(key);
+        const ck = chunkKeyForCoords(x, z);
+        const shard = shards.get(ck);
+        if (!shard) return false;
+        const had = shard.delete(key);
+        if (had) {
+          liveSize--;
+          if (shard.size === 0) shards.delete(ck); // drop empty shard entirely
+        }
+        return had;
+      },
+      has(key) {
+        const [x, z] = parseKeyToCoords(key);
+        const shard = shards.get(chunkKeyForCoords(x, z));
+        return shard ? shard.has(key) : false;
+      },
+      clear() {
+        shards.clear();
+        liveSize = 0;
+      },
+      get size() {
+        return liveSize;
+      },
+      // Sharding-aware fast path: drop an ENTIRE chunk's blocks in O(1),
+      // used by unloadChunk() instead of looping getBlockKey()+delete()
+      // CHUNK_SIZE*CHUNK_SIZE*(heightRange) times.
+      deleteChunk(chunkX, chunkZ) {
+        const ck = chunkX + ',' + chunkZ;
+        const shard = shards.get(ck);
+        if (!shard) return 0;
+        const count = shard.size;
+        shards.delete(ck);
+        liveSize -= count;
+        return count;
+      },
+      // Diagnostics only (not part of the original Map API).
+      _shardCount() { return shards.size; },
+    };
+  }
+
+  const worldMap = global.worldMap || createShardedBlockMap(CONFIG.CHUNK_SIZE); // "x,y,z" -> blockType (shared with index.html), sharded per-chunk internally
   const dirtyChunks = new Set();     // chunk keys touched since last consume (for mesh rebuild)
   const unloadedChunks = new Set();  // chunk keys unloaded since last consume (for mesh teardown)
 
@@ -768,12 +859,20 @@
   function unloadChunk(key, chunk) {
     // Remove this chunk's blocks from worldMap to free memory. Terrain is
     // deterministic, so it regenerates identically if the player returns.
-    const baseX = chunk.chunkX * CONFIG.CHUNK_SIZE;
-    const baseZ = chunk.chunkZ * CONFIG.CHUNK_SIZE;
-    for (let lx = 0; lx < CONFIG.CHUNK_SIZE; lx++) {
-      for (let lz = 0; lz < CONFIG.CHUNK_SIZE; lz++) {
-        for (let y = CONFIG.WORLD_MIN_Y; y <= CONFIG.WORLD_MAX_Y; y++) {
-          worldMap.delete(getBlockKey(baseX + lx, y, baseZ + lz));
+    // worldMap is a ShardedBlockMap: drop the whole per-chunk shard in O(1)
+    // instead of looping ~14k individual Map.delete() calls (this loop was
+    // the proven cause of the 900-1800ms GC/Mark-Compact freeze spikes).
+    if (typeof worldMap.deleteChunk === 'function') {
+      worldMap.deleteChunk(chunk.chunkX, chunk.chunkZ);
+    } else {
+      // Fallback if worldMap was ever swapped for a plain Map externally.
+      const baseX = chunk.chunkX * CONFIG.CHUNK_SIZE;
+      const baseZ = chunk.chunkZ * CONFIG.CHUNK_SIZE;
+      for (let lx = 0; lx < CONFIG.CHUNK_SIZE; lx++) {
+        for (let lz = 0; lz < CONFIG.CHUNK_SIZE; lz++) {
+          for (let y = CONFIG.WORLD_MIN_Y; y <= CONFIG.WORLD_MAX_Y; y++) {
+            worldMap.delete(getBlockKey(baseX + lx, y, baseZ + lz));
+          }
         }
       }
     }
