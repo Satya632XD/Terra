@@ -44,7 +44,9 @@
     UNLOAD_RADIUS: 6,        // chunks farther than this get fully unloaded
 
     // Perf: cap how many NEW chunks we generate in a single update() call so
-    // a burst of movement (teleport/respawn) can't freeze the frame.
+    // a burst of movement (teleport/respawn) can't freeze the frame. Runtime
+    // streaming stays capped, but init() uses the full render radius below so
+    // the first visible frame is not an empty black scene while chunks trickle in.
     MAX_CHUNK_GENS_PER_TICK: 2,
 
     // Ore depth bands (Y level). Configurable rather than hard-coded deep
@@ -881,40 +883,41 @@
     unloadedChunks.add(key);
   }
 
-  function update() {
-    // Skip the expensive scan if the player hasn't crossed into a new chunk.
-    if (playerChunkX === lastStreamedChunkX && playerChunkZ === lastStreamedChunkZ) return;
-    lastStreamedChunkX = playerChunkX;
-    lastStreamedChunkZ = playerChunkZ;
-
-    let generatedThisTick = 0;
-
-    // Generate/load chunks within GENERATE_RADIUS, nearest first, capped
-    // per tick so a big jump (respawn/teleport) can't stall the frame.
+  function getMissingChunksWithinRadius(radius) {
     const candidates = [];
-    for (let dx = -CONFIG.GENERATE_RADIUS; dx <= CONFIG.GENERATE_RADIUS; dx++) {
-      for (let dz = -CONFIG.GENERATE_RADIUS; dz <= CONFIG.GENERATE_RADIUS; dz++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dz = -radius; dz <= radius; dz++) {
         const dist = Math.max(Math.abs(dx), Math.abs(dz));
-        if (dist > CONFIG.GENERATE_RADIUS) continue;
-        candidates.push([dist, playerChunkX + dx, playerChunkZ + dz]);
+        if (dist > radius) continue;
+        const cx = playerChunkX + dx;
+        const cz = playerChunkZ + dz;
+        const key = chunkKey(cx, cz);
+        const existing = chunks.get(key);
+        if (existing && (existing.state === ChunkState.GENERATED || existing.state === ChunkState.LOADED)) {
+          existing.state = ChunkState.LOADED;
+          continue;
+        }
+        candidates.push([dist, cx, cz]);
       }
     }
     candidates.sort((a, b) => a[0] - b[0]);
+    return candidates;
+  }
 
-    for (const [, cx, cz] of candidates) {
+  function streamChunks(maxNewChunks, radius) {
+    let generatedThisTick = 0;
+    for (const [, cx, cz] of getMissingChunksWithinRadius(radius)) {
+      if (generatedThisTick >= maxNewChunks) break;
       const key = chunkKey(cx, cz);
-      const existing = chunks.get(key);
-      if (existing && (existing.state === ChunkState.GENERATED || existing.state === ChunkState.LOADED)) {
-        existing.state = ChunkState.LOADED;
-        continue;
-      }
-      if (generatedThisTick >= CONFIG.MAX_CHUNK_GENS_PER_TICK) break;
       generateChunk(cx, cz);
       const chunk = chunks.get(key);
       if (chunk) chunk.state = ChunkState.LOADED;
       generatedThisTick++;
     }
+    return generatedThisTick;
+  }
 
+  function unloadDistantChunks() {
     // Unload chunks beyond UNLOAD_RADIUS.
     for (const [key, chunk] of chunks.entries()) {
       const dist = Math.max(Math.abs(chunk.chunkX - playerChunkX), Math.abs(chunk.chunkZ - playerChunkZ));
@@ -923,6 +926,29 @@
         dirtyChunks.delete(key);
       }
     }
+  }
+
+  function update() {
+    // Re-scan when the player enters a new chunk, and also while there are
+    // still missing chunks inside the generation radius. The old early return
+    // stopped after the first capped batch, so Terra never registered the rest
+    // of the world until the player crossed a chunk boundary.
+    const sameChunk = playerChunkX === lastStreamedChunkX && playerChunkZ === lastStreamedChunkZ;
+    if (sameChunk && getMissingChunksWithinRadius(CONFIG.GENERATE_RADIUS).length === 0) return;
+    lastStreamedChunkX = playerChunkX;
+    lastStreamedChunkZ = playerChunkZ;
+
+    streamChunks(CONFIG.MAX_CHUNK_GENS_PER_TICK, CONFIG.GENERATE_RADIUS);
+    unloadDistantChunks();
+  }
+
+  function streamInitialChunks() {
+    // Build all chunks the renderer can see before the first frame. This keeps
+    // the initial launch from presenting a black/empty world while preserving
+    // the per-frame generation cap for normal movement.
+    const needed = Math.pow(CONFIG.RENDER_RADIUS * 2 + 1, 2);
+    streamChunks(needed, CONFIG.RENDER_RADIUS);
+    unloadDistantChunks();
   }
 
   function consumeDirtyChunks() {
@@ -964,7 +990,7 @@
     lastStreamedChunkZ = null;
     // Force-stream the initial area around the origin/player immediately.
     setPlayerPosition(0, 0);
-    update();
+    streamInitialChunks();
   }
 
   const WorldGen = {
