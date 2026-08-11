@@ -266,6 +266,7 @@
 <body>
 <div id="root">
   <canvas id="gameCanvas"></canvas>
+  <div id="__dbg" style="position:fixed;top:0;left:0;z-index:999999;background:#000;color:#0f0;font:14px monospace;padding:4px 8px;white-space:pre-wrap;pointer-events:none;"></div>
   <div id="crosshair">+</div>
 
   <div id="vitalsHud">
@@ -3132,209 +3133,208 @@ function initGame(canvas, worldOptions) {
 
   function loop() {
     animationFrameId = requestAnimationFrame(loop);
-    const delta = Math.min(clock.getDelta(), 0.1);
 
-    // --- TEMP PROFILING ---------------------------------------------------
-    // Logs how long each section of the frame took, whenever the frame as a
-    // whole takes longer than 50ms (i.e. whenever it would visibly stutter).
-    // This is here because the last two rounds of fixes to chunk generation
-    // and mesh rebuilding were reasoned from reading the code, not from
-    // actually measuring the live page, and both turned out to be wrong or
-    // incomplete. This will print real numbers in the DevTools console (F12
-    // -> Console tab) the next time the page hangs, showing exactly which
-    // line is slow instead of guessing. Safe to leave in; it only logs when
-    // a frame is already slow, so it won't spam the console during normal
-    // play. Remove this block once the real cause is found and fixed.
-    const __frameStart = performance.now();
-    const __t = {};
-    // -----------------------------------------------------------------------
+    const __dbg = document.getElementById('__dbg');
 
-    WorldGen.setPlayerPosition(player.camera.position.x, player.camera.position.z);
-    WorldGen.update();
-    __t.worldGenUpdate = performance.now() - __frameStart;
+    try {
+      if (__dbg) __dbg.textContent = 'checkpoint 1: frame start';
 
-    player.update(delta, input);
-    __t.playerUpdate = performance.now() - __frameStart - __t.worldGenUpdate;
+      const delta = Math.min(clock.getDelta(), 0.1);
 
-    // World streaming: tell WorldGen where the player is so it can
-    // generate/load nearby chunks and unload distant ones, then rebuild
-    // meshes only for chunks that actually changed (new terrain generated,
-    // or a block was mined/placed) and tear down meshes for chunks that
-    // just got unloaded. This keeps per-frame cost independent of total
-    // world size, which is what makes the infinite world viable on mobile.
-    //
-    // rebuildChunkMesh() scans ~18k blocks per chunk (~60-100ms of work),
-    // and a single WorldGen tick can dirty several chunks at once (a newly
-    // generated chunk marks itself AND up to 4 border-adjacent neighbors
-    // dirty). Draining consumeDirtyChunks() with one rebuildChunkMesh() call
-    // per entry, all inside a single frame, was the second (and bigger)
-    // source of the "Page Unresponsive" freeze — chunk *generation* had
-    // already been moved off the render loop via setTimeout, but mesh
-    // rebuilding was still fully synchronous and uncapped here. Cap how
-    // many chunk meshes get rebuilt per frame and carry the rest over to
-    // next frame's queue instead of draining the whole dirty set at once.
-    const MAX_MESH_REBUILDS_PER_FRAME = 1;
-    const __beforeDirty = performance.now();
-    for (const { chunkX, chunkZ } of WorldGen.consumeDirtyChunks()) {
-      pendingMeshRebuilds.push({ chunkX, chunkZ });
-    }
-    __t.consumeDirty = performance.now() - __beforeDirty;
+      if (__dbg) __dbg.textContent = 'checkpoint 2: WorldGen.setPlayerPosition';
+      WorldGen.setPlayerPosition(player.camera.position.x, player.camera.position.z);
 
-    const __beforeMeshRebuild = performance.now();
-    for (let i = 0; i < MAX_MESH_REBUILDS_PER_FRAME && pendingMeshRebuilds.length > 0; i++) {
-      const { chunkX, chunkZ } = pendingMeshRebuilds.shift();
-      renderer.rebuildChunkMesh(chunkX, chunkZ);
-    }
-    __t.meshRebuild = performance.now() - __beforeMeshRebuild;
-    __t.pendingQueueLength = pendingMeshRebuilds.length;
-    for (const { chunkX, chunkZ } of WorldGen.consumeUnloadedChunks()) {
-      renderer.unloadChunkMesh(chunkX, chunkZ);
-      // Drop any still-pending rebuild for a chunk that just got unloaded -
-      // there's nothing left to build a mesh from.
-      pendingMeshRebuilds = pendingMeshRebuilds.filter(
-        p => !(p.chunkX === chunkX && p.chunkZ === chunkZ)
-      );
-    }
+      if (__dbg) __dbg.textContent = 'checkpoint 3: WorldGen.update';
+      WorldGen.update();
 
-    const digitKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'];
-    const hotbarBlockCount = getHotbarBlockStacks().length;
-    for (let i = 0; i < digitKeys.length && i < hotbarBlockCount; i++) {
-      if (input.keys[digitKeys[i]] && currentSelectedBlockIndex !== i) setSelectedBlockIndex(i);
-    }
+      if (__dbg) __dbg.textContent = 'checkpoint 4: player.update';
+      player.update(delta, input);
 
-    dayNight.update(delta);
-    renderer.updateWater(delta, dayNight.getHorizonColor());
+      // World streaming: tell WorldGen where the player is so it can
+      // generate/load nearby chunks and unload distant ones, then rebuild
+      // meshes only for chunks that actually changed (new terrain generated,
+      // or a block was mined/placed) and tear down meshes for chunks that
+      // just got unloaded. This keeps per-frame cost independent of total
+      // world size, which is what makes the infinite world viable on mobile.
+      //
+      // rebuildChunkMesh() scans ~18k blocks per chunk (~60-100ms of work),
+      // and a single WorldGen tick can dirty several chunks at once (a newly
+      // generated chunk marks itself AND up to 4 border-adjacent neighbors
+      // dirty). Draining consumeDirtyChunks() with one rebuildChunkMesh() call
+      // per entry, all inside a single frame, was the second (and bigger)
+      // source of the "Page Unresponsive" freeze — chunk *generation* had
+      // already been moved off the render loop via setTimeout, but mesh
+      // rebuilding was still fully synchronous and uncapped here. Cap how
+      // many chunk meshes get rebuilt per frame and carry the rest over to
+      // next frame's queue instead of draining the whole dirty set at once.
+      const MAX_MESH_REBUILDS_PER_FRAME = 1;
 
-    const hit = raycast(renderer.camera);
-    if (hit) renderer.setOutline(hit.pos);
-    else renderer.setOutline(null);
-
-    const currentBlockType = hit ? getBlock(hit.pos.x, hit.pos.y, hit.pos.z) : undefined;
-    if (!getIsDead() && currentBlockType && hit && input.isHoldingMine) {
-      const result = updateMining(true, hit, currentBlockType, delta);
-      if (result.mined) {
-        removeBlock(hit.pos.x, hit.pos.y, hit.pos.z);
-        // Rebuild immediately (rather than waiting for next frame's dirty-
-        // chunk sweep) so mined blocks disappear the same frame they're
-        // broken. removeBlock() already marked this chunk (and any
-        // border-adjacent neighbor) dirty; consumeDirtyChunks() later this
-        // frame will just find nothing new to do for it.
-        for (const { chunkX, chunkZ } of WorldGen.consumeDirtyChunks()) {
-          renderer.rebuildChunkMesh(chunkX, chunkZ);
-        }
-        // Drop pops onto the ground at the block's position instead of
-        // teleporting straight into the inventory — the player has to walk
-        // over and pick it up.
-        if (result.droppedItem) spawnGroundItem(result.droppedItem, 1, result.pos);
-        if (result.bonusDrop) spawnGroundItem(result.bonusDrop, 1, result.pos);
+      if (__dbg) __dbg.textContent = 'checkpoint 5: consumeDirtyChunks (queue)';
+      for (const { chunkX, chunkZ } of WorldGen.consumeDirtyChunks()) {
+        pendingMeshRebuilds.push({ chunkX, chunkZ });
       }
-    } else {
-      updateMining(false, null, '', delta);
-    }
 
-    // Hunger drain / starvation damage / passive regen tick.
-    updatePlayerStats(delta, !!(player.isMovingInput || input.isHoldingMine));
-
-    // Death & respawn handling.
-    if (getIsDead()) {
-      if (input.keys['KeyR'] || input.respawnTriggered) {
-        respawnPlayer();
-        player.respawn();
+      if (__dbg) __dbg.textContent = 'checkpoint 6: mesh rebuild drain';
+      for (let i = 0; i < MAX_MESH_REBUILDS_PER_FRAME && pendingMeshRebuilds.length > 0; i++) {
+        const { chunkX, chunkZ } = pendingMeshRebuilds.shift();
+        renderer.rebuildChunkMesh(chunkX, chunkZ);
       }
-    }
 
-    // Eat food (G key / mobile Eat button) — eats the currently selected
-    // hotbar item if it's edible.
-    if (input.eatTriggered) {
-      const hotbarBlocks = getHotbarBlockStacks();
-      const selectedItem = hotbarBlocks[currentSelectedBlockIndex];
-      if (selectedItem && FOOD_DEFS[selectedItem]) {
-        const idx = inventory.findIndex(i => i.item === selectedItem);
-        if (idx !== -1) eatFood(idx);
+      if (__dbg) __dbg.textContent = 'checkpoint 7: consumeUnloadedChunks';
+      for (const { chunkX, chunkZ } of WorldGen.consumeUnloadedChunks()) {
+        renderer.unloadChunkMesh(chunkX, chunkZ);
+        // Drop any still-pending rebuild for a chunk that just got unloaded -
+        // there's nothing left to build a mesh from.
+        pendingMeshRebuilds = pendingMeshRebuilds.filter(
+          p => !(p.chunkX === chunkX && p.chunkZ === chunkZ)
+        );
       }
-    }
 
-    // Proximity pickup of ground items.
-    updateGroundItems(delta, player.camera.position);
-    renderer.syncDrops(groundItems, clock.getElapsedTime());
+      if (__dbg) __dbg.textContent = 'checkpoint 8: hotbar digit keys';
+      const digitKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'];
+      const hotbarBlockCount = getHotbarBlockStacks().length;
+      for (let i = 0; i < digitKeys.length && i < hotbarBlockCount; i++) {
+        if (input.keys[digitKeys[i]] && currentSelectedBlockIndex !== i) setSelectedBlockIndex(i);
+      }
 
-    if (!getIsDead() && hit && input.placeTriggered) {
-      const placePos = hit.pos.clone().add(hit.normal);
-      const px = Math.floor(player.camera.position.x + 0.5);
-      const py = Math.floor(player.camera.position.y - 1.7 + 0.5);
-      const py2 = Math.floor(player.camera.position.y + 0.5);
-      const pz = Math.floor(player.camera.position.z + 0.5);
+      if (__dbg) __dbg.textContent = 'checkpoint 9: dayNight/water update';
+      dayNight.update(delta);
+      renderer.updateWater(delta, dayNight.getHorizonColor());
 
-      const isPlayer = placePos.x === px && placePos.z === pz && (placePos.y === py || placePos.y === py2);
+      if (__dbg) __dbg.textContent = 'checkpoint 10: raycast';
+      const hit = raycast(renderer.camera);
+      if (hit) renderer.setOutline(hit.pos);
+      else renderer.setOutline(null);
 
-      if (!isPlayer && !getBlock(placePos.x, placePos.y, placePos.z)) {
-        const hotbarBlocks = getHotbarBlockStacks();
-        const blockType = hotbarBlocks[currentSelectedBlockIndex];
-        // Placing consumes one unit from inventory — no infinite free blocks.
-        // Food items are selectable in the hotbar (to eat) but aren't
-        // placeable, so skip them here.
-        if (blockType && isPlaceableBlock(blockType) && hasItem(blockType, 1)) {
-          setBlock(placePos.x, placePos.y, placePos.z, blockType);
-          removeItem(blockType, 1);
-          // See the mining code above: rebuild the touched chunk(s) right
-          // away instead of waiting for next frame's dirty-chunk sweep.
+      if (__dbg) __dbg.textContent = 'checkpoint 11: mining';
+      const currentBlockType = hit ? getBlock(hit.pos.x, hit.pos.y, hit.pos.z) : undefined;
+      if (!getIsDead() && currentBlockType && hit && input.isHoldingMine) {
+        const result = updateMining(true, hit, currentBlockType, delta);
+        if (result.mined) {
+          removeBlock(hit.pos.x, hit.pos.y, hit.pos.z);
+          // Rebuild immediately (rather than waiting for next frame's dirty-
+          // chunk sweep) so mined blocks disappear the same frame they're
+          // broken. removeBlock() already marked this chunk (and any
+          // border-adjacent neighbor) dirty; consumeDirtyChunks() later this
+          // frame will just find nothing new to do for it.
           for (const { chunkX, chunkZ } of WorldGen.consumeDirtyChunks()) {
             renderer.rebuildChunkMesh(chunkX, chunkZ);
           }
-          // If that was the last one of this stack, snap selection back into
-          // range so the hotbar doesn't point at a now-missing slot.
-          const newStacks = getHotbarBlockStacks();
-          if (currentSelectedBlockIndex >= newStacks.length) {
-            setSelectedBlockIndex(Math.max(0, newStacks.length - 1));
+          // Drop pops onto the ground at the block's position instead of
+          // teleporting straight into the inventory — the player has to walk
+          // over and pick it up.
+          if (result.droppedItem) spawnGroundItem(result.droppedItem, 1, result.pos);
+          if (result.bonusDrop) spawnGroundItem(result.bonusDrop, 1, result.pos);
+        }
+      } else {
+        updateMining(false, null, '', delta);
+      }
+
+      if (__dbg) __dbg.textContent = 'checkpoint 12: player stats / death';
+      // Hunger drain / starvation damage / passive regen tick.
+      updatePlayerStats(delta, !!(player.isMovingInput || input.isHoldingMine));
+
+      // Death & respawn handling.
+      if (getIsDead()) {
+        if (input.keys['KeyR'] || input.respawnTriggered) {
+          respawnPlayer();
+          player.respawn();
+        }
+      }
+
+      if (__dbg) __dbg.textContent = 'checkpoint 13: eat food';
+      // Eat food (G key / mobile Eat button) — eats the currently selected
+      // hotbar item if it's edible.
+      if (input.eatTriggered) {
+        const hotbarBlocks = getHotbarBlockStacks();
+        const selectedItem = hotbarBlocks[currentSelectedBlockIndex];
+        if (selectedItem && FOOD_DEFS[selectedItem]) {
+          const idx = inventory.findIndex(i => i.item === selectedItem);
+          if (idx !== -1) eatFood(idx);
+        }
+      }
+
+      if (__dbg) __dbg.textContent = 'checkpoint 14: ground items';
+      // Proximity pickup of ground items.
+      updateGroundItems(delta, player.camera.position);
+      renderer.syncDrops(groundItems, clock.getElapsedTime());
+
+      if (__dbg) __dbg.textContent = 'checkpoint 15: place block';
+      if (!getIsDead() && hit && input.placeTriggered) {
+        const placePos = hit.pos.clone().add(hit.normal);
+        const px = Math.floor(player.camera.position.x + 0.5);
+        const py = Math.floor(player.camera.position.y - 1.7 + 0.5);
+        const py2 = Math.floor(player.camera.position.y + 0.5);
+        const pz = Math.floor(player.camera.position.z + 0.5);
+
+        const isPlayer = placePos.x === px && placePos.z === pz && (placePos.y === py || placePos.y === py2);
+
+        if (!isPlayer && !getBlock(placePos.x, placePos.y, placePos.z)) {
+          const hotbarBlocks = getHotbarBlockStacks();
+          const blockType = hotbarBlocks[currentSelectedBlockIndex];
+          // Placing consumes one unit from inventory — no infinite free blocks.
+          // Food items are selectable in the hotbar (to eat) but aren't
+          // placeable, so skip them here.
+          if (blockType && isPlaceableBlock(blockType) && hasItem(blockType, 1)) {
+            setBlock(placePos.x, placePos.y, placePos.z, blockType);
+            removeItem(blockType, 1);
+            // See the mining code above: rebuild the touched chunk(s) right
+            // away instead of waiting for next frame's dirty-chunk sweep.
+            for (const { chunkX, chunkZ } of WorldGen.consumeDirtyChunks()) {
+              renderer.rebuildChunkMesh(chunkX, chunkZ);
+            }
+            // If that was the last one of this stack, snap selection back into
+            // range so the hotbar doesn't point at a now-missing slot.
+            const newStacks = getHotbarBlockStacks();
+            if (currentSelectedBlockIndex >= newStacks.length) {
+              setSelectedBlockIndex(Math.max(0, newStacks.length - 1));
+            }
           }
         }
       }
-    }
 
-    if (input.craftingKeyTriggered) {
-      setCraftingOpen(!craftingOpen, 'hand');
-      if (craftingOpen) {
-        document.exitPointerLock();
-      } else if (!input.isTouch) {
-        canvas.requestPointerLock();
-      }
-    }
-
-    // Interact (F): if not already crafting and looking at a placed
-    // Crafting Table / Large Crafting Table within reach, open that tier.
-    if (input.interactTriggered && !craftingOpen) {
-      const lookHit = hit || raycast(renderer.camera);
-      if (lookHit) {
-        const lookedType = getBlock(lookHit.pos.x, lookHit.pos.y, lookHit.pos.z);
-        const tier = lookedType ? INTERACTABLE_CRAFT_BLOCKS[lookedType] : undefined;
-        if (tier) {
-          setCraftingOpen(true, tier);
+      if (__dbg) __dbg.textContent = 'checkpoint 16: crafting toggle';
+      if (input.craftingKeyTriggered) {
+        setCraftingOpen(!craftingOpen, 'hand');
+        if (craftingOpen) {
           document.exitPointerLock();
+        } else if (!input.isTouch) {
+          canvas.requestPointerLock();
         }
       }
+
+      if (__dbg) __dbg.textContent = 'checkpoint 17: interact';
+      // Interact (F): if not already crafting and looking at a placed
+      // Crafting Table / Large Crafting Table within reach, open that tier.
+      if (input.interactTriggered && !craftingOpen) {
+        const lookHit = hit || raycast(renderer.camera);
+        if (lookHit) {
+          const lookedType = getBlock(lookHit.pos.x, lookHit.pos.y, lookHit.pos.z);
+          const tier = lookedType ? INTERACTABLE_CRAFT_BLOCKS[lookedType] : undefined;
+          if (tier) {
+            setCraftingOpen(true, tier);
+            document.exitPointerLock();
+          }
+        }
+      }
+
+      if (__dbg) __dbg.textContent = 'checkpoint 18: resetTriggers';
+      input.resetTriggers();
+
+      if (__dbg) __dbg.textContent = 'checkpoint 19: renderer.render';
+      renderer.render();
+
+      if (__dbg) __dbg.textContent = 'checkpoint 20: onReady';
+      if (onReady) { const ready = onReady; onReady = null; ready(); }
+
+      if (__dbg) __dbg.textContent = 'checkpoint 21: frame complete';
+    } catch (err) {
+      if (__dbg) {
+        __dbg.textContent = 'FROZEN AT: ' + (__dbg.textContent || '(unknown checkpoint)') +
+          '\nERROR: ' + (err && err.stack ? err.stack : err);
+      }
+      console.error('[Terra loop] exception:', err);
     }
-
-    input.resetTriggers();
-
-    const __beforeRender = performance.now();
-    renderer.render();
-    __t.render = performance.now() - __beforeRender;
-
-    // --- TEMP PROFILING (see note near top of loop()) ----------------------
-    const __frameTotal = performance.now() - __frameStart;
-    if (__frameTotal > 50) {
-      console.warn('[Terra perf] slow frame: ' + __frameTotal.toFixed(1) + 'ms total', {
-        worldGenUpdate: __t.worldGenUpdate.toFixed(1) + 'ms',
-        playerUpdate: __t.playerUpdate.toFixed(1) + 'ms',
-        consumeDirty: __t.consumeDirty.toFixed(1) + 'ms',
-        meshRebuild: __t.meshRebuild.toFixed(1) + 'ms',
-        pendingQueueLength: __t.pendingQueueLength,
-        render: __t.render.toFixed(1) + 'ms',
-      });
-    }
-    // -------------------------------------------------------------------------
-
-    if (onReady) { const ready = onReady; onReady = null; ready(); }
   }
 
   const unsubMining = subscribeMining((progress, pos) => {
