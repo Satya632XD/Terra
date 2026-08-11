@@ -936,49 +936,63 @@
   }
 
   // Per-frame time budget for chunk generation, in milliseconds. Each chunk
-  // costs roughly 150-250ms of synchronous work (terrain + cave noise +
-  // vegetation), which is far more than a 16ms frame budget. Generating one
-  // full chunk per requestAnimationFrame call (the old behavior) produced a
-  // burst of ~200ms-blocking frames back-to-back whenever new chunks were
-  // needed (e.g. right after spawn, or walking toward unexplored terrain),
-  // which is exactly the pattern that trips a browser's "Page Unresponsive"
-  // watchdog even though no single call takes multiple seconds. Capping by
-  // a time budget instead of a chunk count means update() bails out before
-  // it ever blocks a frame for long, spreading the same total work across
-  // more frames instead of spiking any one of them.
-  const FRAME_TIME_BUDGET_MS = 8;
+  // costs roughly 60-150ms of synchronous work (terrain + cave noise +
+  // vegetation) even after trimming noise octaves, which is still far more
+  // than a 16ms frame budget. The previous attempt still called
+  // generateChunk() directly from WorldGen.update(), which itself runs
+  // inside requestAnimationFrame every frame — so as long as any chunk was
+  // missing (e.g. all ~25 chunks around a fresh spawn), every single
+  // animation frame paid a full chunk's cost, which still reads as a
+  // sustained unresponsive stretch to the browser's watchdog.
+  //
+  // The actual fix: stop generating chunks from inside the render loop's
+  // call stack entirely. update() now only ever *schedules* generation via
+  // setTimeout(..., 0), which runs as its own separate task after the
+  // browser has had a chance to paint/handle input - not chained onto the
+  // current animation frame. Only one generation task is ever in flight at
+  // a time (see chunkGenScheduled below), so the very worst case is one
+  // ~60-150ms task at a time, with a real yield back to the browser between
+  // every single chunk instead of between frames only.
+  let chunkGenScheduled = false;
 
   function update() {
     // Re-scan when the player enters a new chunk, and also while there are
-    // still missing chunks inside the generation radius. The old early return
-    // stopped after the first capped batch, so Terra never registered the rest
-    // of the world until the player crossed a chunk boundary.
+    // still missing chunks inside the generation radius.
     const sameChunk = playerChunkX === lastStreamedChunkX && playerChunkZ === lastStreamedChunkZ;
-    if (sameChunk && getMissingChunksWithinRadius(CONFIG.GENERATE_RADIUS).length === 0) return;
+    const missing = getMissingChunksWithinRadius(CONFIG.GENERATE_RADIUS);
+    if (sameChunk && missing.length === 0) return;
     lastStreamedChunkX = playerChunkX;
     lastStreamedChunkZ = playerChunkZ;
 
-    streamChunksWithBudget(CONFIG.GENERATE_RADIUS, FRAME_TIME_BUDGET_MS);
+    scheduleChunkGeneration();
     unloadDistantChunks();
   }
 
-  // Like streamChunks(), but stops generating as soon as the time budget for
-  // this frame is used up rather than after a fixed chunk count — so a slow
-  // chunk (e.g. one with lots of cave/vegetation work) can't blow the frame
-  // budget the way a hard "1 chunk per tick" cap could.
-  function streamChunksWithBudget(radius, budgetMs) {
-    const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + budgetMs;
-    let generatedThisTick = 0;
-    for (const [, cx, cz] of getMissingChunksWithinRadius(radius)) {
-      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-      if (now >= deadline && generatedThisTick > 0) break; // always generate at least 1 so we make progress
+  // Schedules generation of missing chunks one at a time, off the render
+  // loop's call stack, re-scheduling itself until nothing is missing. Using
+  // setTimeout(..., 0) instead of calling generateChunk() inline means each
+  // chunk's ~60-150ms cost is its own browser task, so requestAnimationFrame
+  // callbacks stay short and the page keeps painting/responding to input
+  // while chunks stream in, instead of stacking multiple chunk-generations
+  // worth of blocking time onto the render loop.
+  function scheduleChunkGeneration() {
+    if (chunkGenScheduled) return; // already have one queued/running
+    chunkGenScheduled = true;
+    setTimeout(() => {
+      chunkGenScheduled = false;
+      const missing = getMissingChunksWithinRadius(CONFIG.GENERATE_RADIUS);
+      if (missing.length === 0) return;
+      const [, cx, cz] = missing[0];
       const key = chunkKey(cx, cz);
       generateChunk(cx, cz);
       const chunk = chunks.get(key);
       if (chunk) chunk.state = ChunkState.LOADED;
-      generatedThisTick++;
-    }
-    return generatedThisTick;
+      // More chunks may still be missing - queue the next one. This keeps
+      // going independently of the render loop's frame cadence.
+      if (getMissingChunksWithinRadius(CONFIG.GENERATE_RADIUS).length > 0) {
+        scheduleChunkGeneration();
+      }
+    }, 0);
   }
 
   function streamInitialChunks() {
