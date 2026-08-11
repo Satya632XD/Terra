@@ -2265,7 +2265,23 @@ class GameRenderer {
     for (const entry of blocksByType.entries()) {
       const type = entry[0], positions = entry[1];
       if (positions.length === 0) continue;
-      const instancedMesh = new THREE.InstancedMesh(this.boxGeometry, this.getMaterials(type), positions.length);
+      const mats = this.getMaterials(type);
+      // --- TEMP DIAGNOSTIC: log material state for this chunk's rebuild ---
+      // Added to investigate: mining one block makes the whole chunk render
+      // see-through, with a visible line of light under the grass. That
+      // points at wrong transparent/alphaTest flags being applied to a
+      // block type that should be fully opaque (grass/dirt/stone), rather
+      // than a per-block culling bug. This logs exactly what flags each
+      // material actually has at rebuild time so we can see if e.g. 'grass'
+      // is somehow getting transparent:true instead of only 'leaves'.
+      if (window.__dbg_chunk_log !== false) {
+        console.log('[Terra chunk rebuild]', 'chunk', chunkX + ',' + chunkZ, 'type', type,
+          'count', positions.length,
+          'transparent', mats[0].transparent, 'alphaTest', mats[0].alphaTest,
+          'depthWrite', mats[0].depthWrite, 'depthTest', mats[0].depthTest);
+      }
+      // ---------------------------------------------------------------------
+      const instancedMesh = new THREE.InstancedMesh(this.boxGeometry, mats, positions.length);
       instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
       for (let i = 0; i < positions.length; i++) {
