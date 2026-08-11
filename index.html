@@ -216,6 +216,46 @@
   .invCell .cellCount { position: absolute; bottom: 1px; right: 2px; font-size: 9px; font-weight: bold; color: #fff; text-shadow: 1px 1px 1px #000; }
   .invCell .durBarMini { position: absolute; bottom: 2px; left: 3px; right: 3px; height: 2px; background: rgba(0,0,0,0.4); border-radius: 1px; }
   .invCell .durBarMini .fill { height: 100%; }
+
+  /* --- first-run account and world launcher --- */
+  #launcher { position:fixed; inset:0; z-index:90; display:flex; align-items:center; justify-content:center; padding:24px; color:oklch(96% .02 100); background:oklch(18% .035 84); font-family:Georgia, 'Times New Roman', serif; }
+  #launcher::before { content:''; position:absolute; inset:0; background:radial-gradient(circle at 20% 20%, oklch(34% .06 118 / .55), transparent 42%), linear-gradient(135deg, oklch(24% .04 68), oklch(13% .025 85)); opacity:.96; }
+  .launchShell { position:relative; width:min(980px, 100%); min-height:min(680px, calc(100vh - 48px)); display:grid; grid-template-columns:1.05fr .95fr; overflow:hidden; border:1px solid oklch(72% .08 94 / .45); background:oklch(22% .035 82 / .95); box-shadow:0 28px 80px oklch(8% .02 85 / .6); }
+  .launchArt { position:relative; padding:clamp(28px,6vw,72px); display:flex; flex-direction:column; justify-content:flex-end; background:linear-gradient(160deg, oklch(44% .1 113), oklch(24% .055 83) 65%, oklch(18% .04 66)); }
+  .launchArt::after { content:'✦'; position:absolute; top:44px; right:48px; color:oklch(88% .12 97); font-size:88px; opacity:.45; transform:rotate(12deg); }
+  .eyebrow { margin:0 0 16px; color:oklch(84% .1 100); font:700 12px/1.2 'Segoe UI',sans-serif; letter-spacing:.16em; text-transform:uppercase; }
+  .launchArt h1 { max-width:8ch; margin:0; font-size:clamp(52px,7vw,92px); line-height:.88; letter-spacing:-.06em; text-wrap:balance; }
+  .launchArt p { max-width:30ch; margin:26px 0 0; color:oklch(88% .025 95); font:16px/1.5 'Segoe UI',sans-serif; }
+  .launchPanel { padding:clamp(26px,5vw,58px); display:flex; flex-direction:column; justify-content:center; background:oklch(20% .026 86); }
+  .launchPanel h2 { margin:0 0 8px; font-size:30px; letter-spacing:-.02em; }
+  .launchPanel .sub { margin:0 0 28px; color:oklch(75% .025 90); font:14px/1.5 'Segoe UI',sans-serif; }
+  .launchView { display:none; }
+  .launchView.active { display:block; animation:launchIn .36s cubic-bezier(.16,1,.3,1) both; }
+  @keyframes launchIn { from { opacity:0; transform:translateY(10px) } to { opacity:1; transform:none } }
+  .field { display:grid; gap:7px; margin:0 0 14px; }
+  .field label { color:oklch(78% .03 92); font:700 11px/1.2 'Segoe UI',sans-serif; letter-spacing:.11em; text-transform:uppercase; }
+  .field input { width:100%; height:46px; padding:0 14px; border:1px solid oklch(60% .025 88); border-radius:2px; color:oklch(95% .02 90); background:oklch(15% .02 85); font:16px 'Segoe UI',sans-serif; }
+  .field input:focus { outline:2px solid oklch(80% .12 101); outline-offset:2px; }
+  .launchBtn { width:100%; min-height:46px; border:0; border-radius:2px; cursor:pointer; color:oklch(18% .03 84); background:oklch(82% .13 97); font:700 14px 'Segoe UI',sans-serif; letter-spacing:.03em; transition:transform .15s, background .15s; }
+  .launchBtn:hover { transform:translateY(-2px); background:oklch(88% .13 99); }
+  .launchBtn.secondary { color:oklch(87% .025 92); background:transparent; border:1px solid oklch(65% .025 88); }
+  .launchBtn.secondary:hover { background:oklch(28% .03 85); }
+  .launchActions { display:grid; gap:10px; margin-top:22px; }
+  .launchMessage { min-height:20px; margin:4px 0 14px; color:oklch(76% .12 35); font:13px/1.4 'Segoe UI',sans-serif; }
+  .worldList { display:grid; gap:9px; margin:18px 0; max-height:230px; overflow:auto; }
+  .worldRow { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px; border:1px solid oklch(53% .025 88); background:oklch(24% .025 84); }
+  .worldRow strong { display:block; font:700 16px 'Segoe UI',sans-serif; }
+  .worldRow span { display:block; margin-top:4px; color:oklch(70% .025 88); font:12px 'Segoe UI',sans-serif; }
+  .worldRow button { min-width:72px; min-height:36px; border:1px solid oklch(76% .1 98); color:oklch(86% .12 98); background:transparent; cursor:pointer; }
+  .emptyWorld { padding:22px 4px; color:oklch(70% .025 88); font:14px/1.5 'Segoe UI',sans-serif; }
+  #loadingView { text-align:center; }
+  .loaderRing { width:86px; height:86px; margin:24px auto; border:7px solid oklch(43% .025 88); border-top-color:oklch(84% .13 98); border-radius:50%; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg) } }
+  .progressTrack { height:12px; margin:22px 0 10px; overflow:hidden; background:oklch(13% .02 85); border:1px solid oklch(53% .025 88); }
+  .progressFill { width:0; height:100%; background:oklch(80% .13 98); transition:width .25s ease-out; }
+  .loadMeta { display:flex; justify-content:space-between; color:oklch(72% .025 88); font:12px 'Segoe UI',sans-serif; }
+  @media (max-width:720px) { .launchShell { grid-template-columns:1fr; min-height:0; } .launchArt { min-height:230px; padding:28px; } .launchArt h1 { font-size:56px; } .launchPanel { padding:30px 24px; } }
+
 </style>
 </head>
 <body>
@@ -3005,7 +3045,8 @@ function initUI() {
 /* =========================================================================
    MAIN GAME LOOP  (ported from src/game/game.ts)
    ========================================================================= */
-function initGame(canvas) {
+function initGame(canvas, worldOptions) {
+  worldOptions = worldOptions || {};
   const renderer = new GameRenderer(canvas);
   const input = new InputManager();
   const player = new Player(renderer.camera, canvas, input);
@@ -3018,7 +3059,7 @@ function initGame(canvas) {
   // player moves — init() seeds the generator and streams in the chunks
   // around the spawn point (0, 5) synchronously so spawn ground exists
   // before the first frame renders.
-  WorldGen.init();
+  WorldGen.init(worldOptions.seed);
   renderer.rebuildAllLoadedChunkMeshes();
 
   // Textures load asynchronously (embedded PNGs). Once real artwork is ready,
@@ -3271,12 +3312,60 @@ function boot() {
   setupLandscapeLock();
   initUI();
 
-  try {
-    initGame(canvas);
-  } catch (err) {
-    console.error('Failed to initialise game:', err);
-    webglErrorEl.style.display = 'flex';
+  // Keep the expensive renderer and world generator behind a deliberate start
+  // flow. Accounts/world metadata are local for now, so the prototype stays
+  // playable offline while making the backend seam obvious.
+  const launcher = document.getElementById('launcher');
+  const views = ['accountView', 'loginView', 'worldView', 'loadingView'].map(id => document.getElementById(id));
+  const accountKey = 'terra.accounts.v1';
+  const worldKey = 'terra.worlds.v1';
+  const read = key => { try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch (_) { return {}; } };
+  const write = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+  const showView = id => views.forEach(view => view.classList.toggle('active', view.id === id));
+  const message = (id, text) => { document.getElementById(id).textContent = text; };
+  let currentUser = null;
+
+  function userWorlds() { return read(worldKey)[currentUser] || []; }
+  function renderWorlds() {
+    const list = document.getElementById('worldList');
+    const worlds = userWorlds();
+    list.innerHTML = worlds.length ? worlds.map((world, i) => `<div class="worldRow"><div><strong>${world.name}</strong><span>Seed ${world.seed} · Single player</span></div><button type="button" data-world-index="${i}">Play</button></div>`).join('') : '<div class="emptyWorld">No worlds yet. Create one and Terra will generate it before the game opens.</div>';
+    list.querySelectorAll('[data-world-index]').forEach(button => button.addEventListener('click', () => startWorld(worlds[Number(button.dataset.worldIndex)])));
   }
+  function enterWorlds() { document.getElementById('worldHeading').textContent = `Hi, ${currentUser}`; renderWorlds(); showView('worldView'); }
+  function startWorld(world) {
+    showView('loadingView');
+    let progress = 0;
+    const fill = document.getElementById('progressFill');
+    const value = document.getElementById('progressValue');
+    const label = document.getElementById('loadingLabel');
+    const steps = ['Choosing a seed...', 'Carving terrain, placing rivers...', 'Loading the spawn chunks...', 'Almost there...'];
+    const timer = setInterval(() => {
+      progress = Math.min(100, progress + (progress < 70 ? 7 : 4));
+      fill.style.width = progress + '%'; value.textContent = progress + '%'; label.textContent = steps[Math.min(steps.length - 1, Math.floor(progress / 26))];
+      if (progress >= 100) {
+        clearInterval(timer);
+        try { initGame(canvas, { seed: world.seed }); launcher.remove(); } catch (err) { console.error('Failed to initialise game:', err); launcher.remove(); webglErrorEl.style.display = 'flex'; }
+      }
+    }, 90);
+  }
+  document.getElementById('showLogin').addEventListener('click', () => { message('accountMessage', ''); showView('loginView'); });
+  document.getElementById('showCreate').addEventListener('click', () => { message('loginMessage', ''); showView('accountView'); });
+  document.getElementById('accountForm').addEventListener('submit', event => {
+    event.preventDefault(); const username = document.getElementById('username').value.trim(); const password = document.getElementById('password').value; const accounts = read(accountKey);
+    if (accounts[username]) { message('accountMessage', 'That username already exists. Try logging in.'); return; }
+    accounts[username] = { password, email: document.getElementById('email').value.trim() }; write(accountKey, accounts); currentUser = username; const worlds = read(worldKey); worlds[username] = worlds[username] || []; write(worldKey, worlds); enterWorlds();
+  });
+  document.getElementById('loginForm').addEventListener('submit', event => {
+    event.preventDefault(); const username = document.getElementById('loginUsername').value.trim(); const accounts = read(accountKey);
+    if (!accounts[username] || accounts[username].password !== document.getElementById('loginPassword').value) { message('loginMessage', 'Username or password does not match.'); return; }
+    currentUser = username; enterWorlds();
+  });
+  document.getElementById('createWorld').addEventListener('click', () => {
+    const worlds = read(worldKey); const userWorlds = worlds[currentUser] || []; const world = { name: `World ${userWorlds.length + 1}`, seed: Date.now() >>> 0, createdAt: new Date().toISOString() };
+    userWorlds.push(world); worlds[currentUser] = userWorlds; write(worldKey, worlds); startWorld(world);
+  });
+  document.getElementById('logout').addEventListener('click', () => { currentUser = null; showView('accountView'); });
 }
 
 if (document.readyState === 'loading') {
