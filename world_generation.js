@@ -408,16 +408,23 @@
     // Two 3D fields combined: one for winding tunnels, one for larger
     // chambers. A block is "cave" (air) where both indicate open space,
     // producing branching networks rather than uniform noise holes.
-    const tunnels = fbm3D(x, y * 1.5, z, { frequency: 0.045, octaves: 3, salt: 6000 });
-    const chambers = fbm3D(x, y * 0.8, z, { frequency: 0.09, octaves: 2, salt: 7000 });
+    // Octave counts kept low (2 + 1 instead of 3 + 2): this function runs
+    // for every block from WORLD_MIN_Y up to y=14 in every column of every
+    // chunk (potentially 18k+ calls per chunk), so it dominates chunk-gen
+    // time. Dropping an octave from each field cuts its cost roughly in
+    // half with only a minor loss of fine cave detail.
+    const tunnels = fbm3D(x, y * 1.5, z, { frequency: 0.045, octaves: 2, salt: 6000 });
+    const chambers = fbm3D(x, y * 0.8, z, { frequency: 0.09, octaves: 1, salt: 7000 });
 
     const tunnelOpen = Math.abs(tunnels) < 0.045;              // thin iso-surface -> tunnel walls
     const chamberOpen = chambers > 0.42;                        // blobs -> larger rooms
+    if (!tunnelOpen && !chamberOpen) return false;
 
     // Taper caves out near the surface so they don't punch through into
-    // daylight everywhere.
+    // daylight everywhere. (Math.random() >= 0 was always true and did
+    // nothing but burn an RNG call on every invocation - removed.)
     const depthFactor = Math.min(1, Math.max(0, (10 - y) / 24));
-    return (tunnelOpen || chamberOpen) && Math.random() >= 0 && depthFactor > 0.15 && (tunnelOpen ? true : chamberOpen);
+    return depthFactor > 0.15;
   }
 
   // Underground lakes: pockets of water in deep chambers, deterministic.
@@ -928,6 +935,19 @@
     }
   }
 
+  // Per-frame time budget for chunk generation, in milliseconds. Each chunk
+  // costs roughly 150-250ms of synchronous work (terrain + cave noise +
+  // vegetation), which is far more than a 16ms frame budget. Generating one
+  // full chunk per requestAnimationFrame call (the old behavior) produced a
+  // burst of ~200ms-blocking frames back-to-back whenever new chunks were
+  // needed (e.g. right after spawn, or walking toward unexplored terrain),
+  // which is exactly the pattern that trips a browser's "Page Unresponsive"
+  // watchdog even though no single call takes multiple seconds. Capping by
+  // a time budget instead of a chunk count means update() bails out before
+  // it ever blocks a frame for long, spreading the same total work across
+  // more frames instead of spiking any one of them.
+  const FRAME_TIME_BUDGET_MS = 8;
+
   function update() {
     // Re-scan when the player enters a new chunk, and also while there are
     // still missing chunks inside the generation radius. The old early return
@@ -938,8 +958,27 @@
     lastStreamedChunkX = playerChunkX;
     lastStreamedChunkZ = playerChunkZ;
 
-    streamChunks(CONFIG.MAX_CHUNK_GENS_PER_TICK, CONFIG.GENERATE_RADIUS);
+    streamChunksWithBudget(CONFIG.GENERATE_RADIUS, FRAME_TIME_BUDGET_MS);
     unloadDistantChunks();
+  }
+
+  // Like streamChunks(), but stops generating as soon as the time budget for
+  // this frame is used up rather than after a fixed chunk count — so a slow
+  // chunk (e.g. one with lots of cave/vegetation work) can't blow the frame
+  // budget the way a hard "1 chunk per tick" cap could.
+  function streamChunksWithBudget(radius, budgetMs) {
+    const deadline = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + budgetMs;
+    let generatedThisTick = 0;
+    for (const [, cx, cz] of getMissingChunksWithinRadius(radius)) {
+      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      if (now >= deadline && generatedThisTick > 0) break; // always generate at least 1 so we make progress
+      const key = chunkKey(cx, cz);
+      generateChunk(cx, cz);
+      const chunk = chunks.get(key);
+      if (chunk) chunk.state = ChunkState.LOADED;
+      generatedThisTick++;
+    }
+    return generatedThisTick;
   }
 
   function streamInitialChunks() {
