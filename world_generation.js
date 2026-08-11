@@ -1,5 +1,5 @@
 /* =========================================================================
-   world_generation.js lol
+   world_generation.js
    -------------------------------------------------------------------------
    Seeded, chunk-based, biome-rich world generator for the voxel game in
    index.html. This file owns: world seed, noise, chunks, biomes, terrain,
