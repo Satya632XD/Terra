@@ -1442,27 +1442,13 @@ function updateMining(isHoldingMine, hitResult, blockType, delta) {
   notifyMining(miningState.progress, hitResult.pos);
 
   if (miningState.progress >= 1) {
-    const reqTier = BLOCK_REQUIRED_TIER[blockType];
-    let canDrop = true;
-
-    if (reqTier) {
-      if (!heldToolItem || !TOOL_DEFS[heldToolItem.item]) {
-        canDrop = false;
-      } else {
-        const toolMat = TOOL_DEFS[heldToolItem.item].material;
-        // 'large' tools are top-tier — they satisfy any material requirement,
-        // including bedrock's 'iron' requirement (which, practically, never
-        // matters since bedrock hardness is Infinity, but keeps this correct).
-        if (toolMat !== 'large') {
-          if (reqTier === 'iron' && toolMat !== 'iron') canDrop = false;
-          if (reqTier === 'stone' && toolMat === 'wood') canDrop = false;
-        }
-      }
-    }
-
+    // Mining always yields the block's normal drop when the block is actually
+    // broken. Tool tiers affect mining speed, not whether the drop exists.
+    // This keeps the promised one-block -> one-drop behavior reliable on
+    // touch devices too, where the player may not yet have a tool equipped.
     let droppedItem = null;
     let bonusDrop = null;
-    if (canDrop) {
+    {
       const dropMapEntry = BLOCK_DROPS[blockType];
       droppedItem = dropMapEntry === undefined ? blockType : dropMapEntry;
       if (blockType === 'iron_ore') droppedItem = 'raw_iron';
@@ -2008,7 +1994,7 @@ class DayNightCycle {
     this.tmpSunB = new THREE.Color();
     this.sunDir = new THREE.Vector3();
     this.palette = { top: new THREE.Color(), horizon: new THREE.Color(), bottom: new THREE.Color() };
-    this.scene.fog = new THREE.Fog(this.sky.horizonColor.getHex(), 18, 64);
+    this.scene.fog = new THREE.Fog(this.sky.horizonColor.getHex(), 16, 52);
   }
 
   update(delta) {
