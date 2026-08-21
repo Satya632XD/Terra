@@ -1629,8 +1629,9 @@ class Player {
     this.gravity = 20.0;
     this.jumpForce = 8.0;
     this.fallStartY = null; // tracks the highest Y since leaving the ground, for fall damage
+    this.spawnPosition = new THREE.Vector3(0, 6.7, 5);
 
-    this.camera.position.set(0, 5, 5);
+    this.camera.position.copy(this.spawnPosition);
     this.camera.lookAt(0, 5, 0);
 
     this.controls = new SimplePointerLockControls(this.camera, domElement);
@@ -1662,8 +1663,16 @@ class Player {
     return false;
   }
 
+  setSpawnPosition(x, y, z) {
+    this.spawnPosition.set(x, y, z);
+    this.camera.position.copy(this.spawnPosition);
+    this.velocity.set(0, 0, 0);
+    this.fallStartY = null;
+    this.onGround = false;
+  }
+
   respawn() {
-    this.camera.position.set(0, 8, 5);
+    this.camera.position.copy(this.spawnPosition);
     this.velocity.set(0, 0, 0);
     this.fallStartY = null;
     this.onGround = false;
@@ -1999,7 +2008,7 @@ class DayNightCycle {
     this.tmpSunB = new THREE.Color();
     this.sunDir = new THREE.Vector3();
     this.palette = { top: new THREE.Color(), horizon: new THREE.Color(), bottom: new THREE.Color() };
-    this.scene.fog = new THREE.Fog(this.sky.horizonColor.getHex(), 25, 90);
+    this.scene.fog = new THREE.Fog(this.sky.horizonColor.getHex(), 18, 64);
   }
 
   update(delta) {
@@ -2062,7 +2071,7 @@ const FACES = [
 class GameRenderer {
   constructor(canvas) {
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 72);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, failIfMajorPerformanceCaveat: false });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -3113,7 +3122,10 @@ function initGame(canvas, worldOptions) {
   // around the spawn point (0, 5) synchronously so spawn ground exists
   // before the first frame renders.
   const __initStart = performance.now();
-  WorldGen.init(worldOptions.seed);
+  WorldGen.init(worldOptions.seed, { persistenceKey: worldOptions.persistenceKey || null });
+  const spawn = WorldGen.findSafeSpawn(0, 0);
+  player.setSpawnPosition(spawn.x, spawn.y, spawn.z);
+  renderer.camera.lookAt(spawn.x, spawn.y, spawn.z - 1);
   console.log('[Terra perf] WorldGen.init:', (performance.now() - __initStart).toFixed(1) + 'ms');
   const __meshStart = performance.now();
   renderer.rebuildAllLoadedChunkMeshes();
@@ -3135,6 +3147,10 @@ function initGame(canvas, worldOptions) {
   // per frame by the loop below instead of all at once (see loop()).
   let pendingMeshRebuilds = [];
 
+  const flushTerraPersistence = () => {
+    try { WorldGen.flushPersistence(); } catch (_) {}
+  };
+  window.addEventListener('beforeunload', flushTerraPersistence, { once: true });
 
   function loop() {
     animationFrameId = requestAnimationFrame(loop);
@@ -3422,9 +3438,20 @@ function boot() {
   let currentUser = null;
 
   function userWorlds() { return read(worldKey)[currentUser] || []; }
+  function makeWorldId() { return 'w-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+  function ensureWorldIds() {
+    const worlds = read(worldKey);
+    const list = worlds[currentUser] || [];
+    let changed = false;
+    for (const world of list) {
+      if (!world.id) { world.id = makeWorldId(); changed = true; }
+    }
+    if (changed) { worlds[currentUser] = list; write(worldKey, worlds); }
+    return list;
+  }
   function renderWorlds() {
     const list = document.getElementById('worldList');
-    const worlds = userWorlds();
+    const worlds = ensureWorldIds();
     const esc = value => String(value).replace(/[&<>\"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch]));
     list.innerHTML = worlds.length ? worlds.map((world, i) => `<div class="worldRow"><div><strong>${esc(world.name)}</strong><span>Seed ${esc(world.seed)} · Single player</span></div><button type="button" data-world-index="${i}">Play</button></div>`).join('') : '<div class="emptyWorld">No worlds yet. Create one and Terra will generate it before the game opens.</div>';
     list.querySelectorAll('[data-world-index]').forEach(button => button.addEventListener('click', () => startWorld(worlds[Number(button.dataset.worldIndex)])));
@@ -3442,7 +3469,13 @@ function boot() {
       fill.style.width = progress + '%'; value.textContent = progress + '%'; label.textContent = steps[Math.min(steps.length - 1, Math.floor(progress / 26))];
       if (progress >= 100) {
         clearInterval(timer);
-        try { initGame(canvas, { seed: world.seed, onReady: () => requestAnimationFrame(() => launcher.remove()) }); } catch (err) { console.error('Failed to initialise game:', err); launcher.remove(); webglErrorEl.style.display = 'flex'; }
+        try {
+          initGame(canvas, {
+            seed: world.seed,
+            persistenceKey: 'terra.voxels.v1:' + currentUser + ':' + world.id,
+            onReady: () => requestAnimationFrame(() => launcher.remove())
+          });
+        } catch (err) { console.error('Failed to initialise game:', err); launcher.remove(); webglErrorEl.style.display = 'flex'; }
       }
     }, 90);
   }
@@ -3463,7 +3496,7 @@ function boot() {
   document.getElementById('multiplayerMode').addEventListener('click', () => { selectedMode = 'multi'; document.getElementById('multiplayerMode').classList.add('active'); document.getElementById('singlePlayerMode').classList.remove('active'); document.getElementById('multiplayerNotice').hidden = false; renderWorlds(); });
   document.getElementById('createWorld').addEventListener('click', () => {
     if (selectedMode === 'multi') { message('multiplayerNotice', 'Multiplayer needs a live room server. The UI is ready, but this offline build will not pretend localStorage is a network.'); return; }
-    const worlds = read(worldKey); const userWorlds = worlds[currentUser] || []; const world = { name: `World ${userWorlds.length + 1}`, seed: (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0, createdAt: new Date().toISOString() };
+    const worlds = read(worldKey); const userWorlds = worlds[currentUser] || []; const world = { id: makeWorldId(), name: `World ${userWorlds.length + 1}`, seed: (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0, createdAt: new Date().toISOString() };
     userWorlds.push(world); worlds[currentUser] = userWorlds; write(worldKey, worlds); startWorld(world);
   });
   document.getElementById('logout').addEventListener('click', () => { currentUser = null; showView('accountView'); });
