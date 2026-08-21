@@ -266,7 +266,6 @@
 <body>
 <div id="root">
   <canvas id="gameCanvas"></canvas>
-  <div id="__dbg" style="position:fixed;top:0;left:0;z-index:999999;background:#000;color:#0f0;font:14px monospace;padding:4px 8px;white-space:pre-wrap;pointer-events:none;"></div>
   <div id="crosshair">+</div>
 
   <div id="vitalsHud">
@@ -431,32 +430,27 @@ const BLOCK_COLORS = {
   large_crafting_table: { top: '#8B6340', side: '#5C4128', bottom: '#5C4128' },
   // Added for world_generation.js's snow-line terrain (mountain peaks / snowy biomes).
   snow: { top: '#F5F9FF', side: '#F5F9FF', bottom: '#F5F9FF' },
-  // Real water voxel (see WATER_BLOCK_TYPE / getMaterials' water branch below
-  // for the actual transparent rendering — these colors are only the
-  // placeholder fill used while/if a texture pass is drawn for it).
-  water: { top: '#2E7BB8', side: '#2E7BB8', bottom: '#2E7BB8' },
+  water: { top: '#4BBFEA', side: '#2B8FC6', bottom: '#1F6C9A' },
 };
 
-// The single non-solid, non-mineable-by-hand block type. Centralized here so
-// collision, raycast targeting, mesh culling, and material selection all
-// agree on what "is water" means instead of string-comparing 'water' in
-// four different places.
-const WATER_BLOCK_TYPE = 'water';
-function isWaterBlock(type) { return type === WATER_BLOCK_TYPE; }
+const ITEM_SWATCH_COLORS = {
+  iron_bucket: '#AEB7C1',
+  water_bucket: '#2B8FC6',
+};
 
 // All placeable block types the player can ever hold. The actual hotbar shown
 // in the UI is derived from inventory contents (see renderHotbar) — this list
 // just constrains which item ids are treated as "blocks" that can be placed.
 const PLACEABLE_BLOCKS = ['grass', 'dirt', 'log', 'cobblestone', 'wood', 'planks', 'brick', 'leaves', 'sand', 'gravel', 'stone', 'crafting_table', 'large_crafting_table'];
+const USABLE_ITEMS = ['iron_bucket', 'water_bucket'];
 function isPlaceableBlock(itemId) { return PLACEABLE_BLOCKS.indexOf(itemId) !== -1; }
+function isBucketItem(itemId) { return USABLE_ITEMS.indexOf(itemId) !== -1; }
+function isHotbarItem(itemId) {
+  return isPlaceableBlock(itemId) || FOOD_DEFS[itemId] !== undefined || isBucketItem(itemId);
+}
 
-// NOTE: the world is no longer a fixed 32x32 island — terrain now streams in
-// infinitely via world_generation.js (WorldGen). These constants are unused
-// leftovers from that fixed-island era (they used to size/position the
-// single full-scene Water plane, which has been removed — water is now real
-// per-chunk voxel terrain, see world_generation.js's water generation and
-// GameRenderer.getMaterials()'s water branch). Left in place since nothing
-// else currently depends on removing them.
+// NOTE: the world is streamed infinitely via world_generation.js. These
+// legacy footprint constants remain only for unrelated compatibility code.
 const WORLD_SIZE = 32;
 const WORLD_HALF = WORLD_SIZE / 2;
 const CHUNK_MIN_X = -WORLD_HALF;
@@ -512,6 +506,7 @@ const BLOCK_HARDNESS = {
   bedrock: Infinity, gravel: 0.9, sand: 0.75, diamond_ore: 18.0,
   crafting_table: 2.5, large_crafting_table: 3.5,
   snow: 0.5,
+  water: Infinity,
 };
 
 const BLOCK_CATEGORY = {
@@ -529,16 +524,13 @@ const BLOCK_REQUIRED_TIER = {
   bedrock: 'iron', gravel: null, sand: null, diamond_ore: 'iron',
   crafting_table: null, large_crafting_table: null,
   snow: null,
+  water: null,
 };
 
 const BLOCK_DROPS = {
   stone: 'cobblestone',
   iron_ore: null,
   diamond_ore: null,
-  // Defensive: water is non-solid so it's never actually returned as a
-  // raycast target (see raycast()'s isWaterBlock skip below) and therefore
-  // never reaches the mining path in practice, but if that ever changed this
-  // guarantees breaking it produces no drop rather than an item named 'water'.
   water: null,
 };
 
@@ -618,6 +610,12 @@ const RECIPES = [
   { id: 'smelt_iron', label: 'Smelt Iron Ingot', tier: 'table',
     result: { item: 'iron_ingot', count: 1 },
     grid: [ ['raw_iron', 'planks', null], [null, null, null], [null, null, null] ] },
+
+  { id: 'iron_bucket', label: 'Iron Bucket', tier: 'table',
+    result: { item: 'iron_bucket', count: 1 },
+    grid: [ [null, 'iron_ingot', 'iron_ingot'],
+            ['iron_ingot', null, null],
+            ['iron_ingot', 'iron_ingot', null] ] },
 
   // ---- Large crafting (4x4), needs Large Crafting Table ----
   { id: 'large_pickaxe', label: 'Large Pickaxe', tier: 'large',
@@ -1355,11 +1353,16 @@ class InputManager {
   }
 }
 
+function isSolidBlockType(blockType) {
+  return !!blockType && blockType !== 'water';
+}
+
 /* =========================================================================
    RAYCASTER  (ported from src/game/raycaster.ts)
    ========================================================================= */
-function raycast(camera, maxDist) {
+function raycast(camera, maxDist, includeWater) {
   if (maxDist === undefined) maxDist = 5;
+  includeWater = !!includeWater;
   const start = camera.position.clone();
   const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
 
@@ -1373,11 +1376,8 @@ function raycast(camera, maxDist) {
     const by = Math.floor(pos.y + 0.5);
     const bz = Math.floor(pos.z + 0.5);
 
-    const block = getBlock(bx, by, bz);
-    // Water is non-solid and non-mineable, so the ray passes straight
-    // through it instead of stopping there - the player can mine/place
-    // through water to whatever solid block is beyond it, same as air.
-    if (block && !isWaterBlock(block)) {
+    const blockType = getBlock(bx, by, bz);
+    if (blockType && (includeWater || blockType !== 'water')) {
       const lx = Math.floor(lastPos.x + 0.5);
       const ly = Math.floor(lastPos.y + 0.5);
       const lz = Math.floor(lastPos.z + 0.5);
@@ -1442,27 +1442,13 @@ function updateMining(isHoldingMine, hitResult, blockType, delta) {
   notifyMining(miningState.progress, hitResult.pos);
 
   if (miningState.progress >= 1) {
-    const reqTier = BLOCK_REQUIRED_TIER[blockType];
-    let canDrop = true;
-
-    if (reqTier) {
-      if (!heldToolItem || !TOOL_DEFS[heldToolItem.item]) {
-        canDrop = false;
-      } else {
-        const toolMat = TOOL_DEFS[heldToolItem.item].material;
-        // 'large' tools are top-tier — they satisfy any material requirement,
-        // including bedrock's 'iron' requirement (which, practically, never
-        // matters since bedrock hardness is Infinity, but keeps this correct).
-        if (toolMat !== 'large') {
-          if (reqTier === 'iron' && toolMat !== 'iron') canDrop = false;
-          if (reqTier === 'stone' && toolMat === 'wood') canDrop = false;
-        }
-      }
-    }
-
+    // Mining always yields the block's normal drop when the block is actually
+    // broken. Tool tiers affect mining speed, not whether the drop exists.
+    // This keeps the promised one-block -> one-drop behavior reliable on
+    // touch devices too, where the player may not yet have a tool equipped.
     let droppedItem = null;
     let bonusDrop = null;
-    if (canDrop) {
+    {
       const dropMapEntry = BLOCK_DROPS[blockType];
       droppedItem = dropMapEntry === undefined ? blockType : dropMapEntry;
       if (blockType === 'iron_ore') droppedItem = 'raw_iron';
@@ -1629,8 +1615,9 @@ class Player {
     this.gravity = 20.0;
     this.jumpForce = 8.0;
     this.fallStartY = null; // tracks the highest Y since leaving the ground, for fall damage
+    this.spawnPosition = new THREE.Vector3(0, 6.7, 5);
 
-    this.camera.position.set(0, 5, 5);
+    this.camera.position.copy(this.spawnPosition);
     this.camera.lookAt(0, 5, 0);
 
     this.controls = new SimplePointerLockControls(this.camera, domElement);
@@ -1646,27 +1633,57 @@ class Player {
     }
   }
 
-  checkCollision(pos) {
+  // Horizontal movement must not test the block directly under the player's
+  // feet. The old single collision routine did exactly that, so every X/Z
+  // movement attempt collided with the floor and was immediately rolled back.
+  checkHorizontalCollision(pos) {
     const hx = 0.3, hz = 0.3, height = 1.7;
-    const yOffsets = [0, height / 2, height];
+    // Stay slightly above the floor so the supporting block is not treated as
+    // a wall during X/Z movement. The top sample is also kept just below the
+    // camera's upper edge to avoid numerical contact with a ceiling.
+    const yOffsets = [0.55, height * 0.5 + 0.1, height - 0.08];
     for (const yo of yOffsets) {
       for (const xo of [-hx, hx]) {
         for (const zo of [-hz, hz]) {
           const x = Math.floor(pos.x + xo + 0.5);
           const y = Math.floor(pos.y - 1.7 + yo + 0.5);
           const z = Math.floor(pos.z + zo + 0.5);
-          const block = getBlock(x, y, z);
-          // Water is non-solid: the player swims/walks through it instead of
-          // colliding like a solid block.
-          if (block && !isWaterBlock(block)) return true;
+          if (isSolidBlockType(getBlock(x, y, z))) return true;
         }
       }
     }
     return false;
   }
 
+  // Vertical collision deliberately includes the feet sample, because the
+  // player needs the ground to stop falling. It also catches ceiling contact
+  // while jumping.
+  checkVerticalCollision(pos) {
+    const hx = 0.3, hz = 0.3, height = 1.7;
+    const yOffsets = [0, height];
+    for (const yo of yOffsets) {
+      for (const xo of [-hx, hx]) {
+        for (const zo of [-hz, hz]) {
+          const x = Math.floor(pos.x + xo + 0.5);
+          const y = Math.floor(pos.y - 1.7 + yo + 0.5);
+          const z = Math.floor(pos.z + zo + 0.5);
+          if (isSolidBlockType(getBlock(x, y, z))) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  setSpawnPosition(x, y, z) {
+    this.spawnPosition.set(x, y, z);
+    this.camera.position.copy(this.spawnPosition);
+    this.velocity.set(0, 0, 0);
+    this.fallStartY = null;
+    this.onGround = false;
+  }
+
   respawn() {
-    this.camera.position.set(0, 8, 5);
+    this.camera.position.copy(this.spawnPosition);
     this.velocity.set(0, 0, 0);
     this.fallStartY = null;
     this.onGround = false;
@@ -1717,12 +1734,12 @@ class Player {
     }
 
     this.camera.position.x += moveVector.x;
-    if (this.checkCollision(this.camera.position)) {
+    if (this.checkHorizontalCollision(this.camera.position)) {
       this.camera.position.x -= moveVector.x;
     }
 
     this.camera.position.z += moveVector.z;
-    if (this.checkCollision(this.camera.position)) {
+    if (this.checkHorizontalCollision(this.camera.position)) {
       this.camera.position.z -= moveVector.z;
     }
 
@@ -1736,7 +1753,7 @@ class Player {
     }
 
     this.camera.position.y += this.velocity.y * delta;
-    if (this.checkCollision(this.camera.position)) {
+    if (this.checkVerticalCollision(this.camera.position)) {
       if (this.velocity.y < 0) {
         this.onGround = true;
         if (this.fallStartY !== null) {
@@ -2002,7 +2019,7 @@ class DayNightCycle {
     this.tmpSunB = new THREE.Color();
     this.sunDir = new THREE.Vector3();
     this.palette = { top: new THREE.Color(), horizon: new THREE.Color(), bottom: new THREE.Color() };
-    this.scene.fog = new THREE.Fog(this.sky.horizonColor.getHex(), 25, 90);
+    this.scene.fog = new THREE.Fog(this.sky.horizonColor.getHex(), 16, 52);
   }
 
   update(delta) {
@@ -2065,7 +2082,7 @@ const FACES = [
 class GameRenderer {
   constructor(canvas) {
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 72);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, failIfMajorPerformanceCaveat: false });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -2112,39 +2129,27 @@ class GameRenderer {
 
   getMaterials(blockType) {
     if (!this.materials.has(blockType)) {
-      // 'leaves' uses alphaTest (a binary cutout - each pixel is either
-      // fully opaque or fully discarded), which is safe to combine with the
-      // default depthWrite:true since there's no partial-alpha blending to
-      // order.
-      //
-      // 'water' is real alpha blending (a translucent, not cutout, block),
-      // so it needs its own branch: transparent:true WITHOUT depthWrite is
-      // mandatory here. This is the actual fix for bug #2/#4 - the old
-      // full-scene Water plane was transparent:true with depthWrite left at
-      // its default (true), so it wrote depth values into the depth buffer
-      // for a huge double-sided quad slicing through the terrain, which
-      // corrupted depth testing for opaque chunk geometry drawn near/behind
-      // it and read as "the whole chunk went see-through". A depthWrite:false
-      // transparent material can never do that: it still depth-*tests*
-      // against solid terrain (so it's properly occluded/occludes correctly
-      // relative to opaque blocks) but never writes into the depth buffer
-      // itself, so it can't corrupt what opaque geometry draws afterward.
-      // side:DoubleSide keeps the water body's underside visible when the
-      // player is below the surface looking up.
-      const isWater = isWaterBlock(blockType);
-      const alphaTest = blockType === 'leaves' ? 0.5 : 0;
-      const transparent = blockType === 'leaves' || isWater;
-      const extra = isWater
-        ? { transparent: true, depthWrite: false, opacity: 0.72, side: THREE.DoubleSide }
-        : { alphaTest, transparent };
-      this.materials.set(blockType, [
-        new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'side'), ...extra }),
-        new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'side'), ...extra }),
-        new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'top'), ...extra }),
-        new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'bottom'), ...extra }),
-        new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'side'), ...extra }),
-        new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'side'), ...extra }),
-      ]);
+      if (blockType === 'water') {
+        const waterMat = new THREE.MeshLambertMaterial({
+          color: 0x2B9BCB,
+          transparent: true,
+          opacity: 0.58,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        this.materials.set(blockType, [waterMat, waterMat, waterMat, waterMat, waterMat, waterMat]);
+      } else {
+        const alphaTest = blockType === 'leaves' ? 0.5 : 0;
+        const transparent = blockType === 'leaves';
+        this.materials.set(blockType, [
+          new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'side'), alphaTest, transparent }),
+          new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'side'), alphaTest, transparent }),
+          new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'top'), alphaTest, transparent }),
+          new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'bottom'), alphaTest, transparent }),
+          new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'side'), alphaTest, transparent }),
+          new THREE.MeshLambertMaterial({ map: getTexture(blockType, 'side'), alphaTest, transparent }),
+        ]);
+      }
     }
     return this.materials.get(blockType);
   }
@@ -2200,27 +2205,16 @@ class GameRenderer {
           const type = getBlock(x, y, z);
           if (!type) continue;
 
-          // A face renders when its neighbor is air, or a translucent block
-          // type (leaves' alpha cutout, water's alpha blend) that doesn't
-          // fully occlude it. Water gets the same treatment leaves already
-          // had: a solid block face touching water must render (so a lake
-          // bed or shoreline wall doesn't vanish), and a water face touching
-          // a solid block must also render (so the water surface/walls are
-          // visible) via the same rule applied when `type` is water.
-          const isWaterSelf = isWaterBlock(type);
           let isHidden = true;
           for (const face of FACES) {
             const neighbor = getBlock(x + face.dir[0], y + face.dir[1], z + face.dir[2]);
-            if (!neighbor || neighbor === 'leaves') { isHidden = false; break; }
-            // Two adjacent water voxels: don't render the shared internal
-            // face (avoids stacked translucent quads inside one water body
-            // making it look darker/wrong), but water-next-to-solid, and
-            // solid-next-to-water, both still render.
-            if (isWaterBlock(neighbor)) {
-              if (!isWaterSelf) { isHidden = false; break; }
-              continue;
+            let occludesFace = !!neighbor && neighbor !== 'leaves';
+            if (type === 'water') {
+              occludesFace = neighbor === 'water';
+            } else if (neighbor === 'water') {
+              occludesFace = false;
             }
-            if (isWaterSelf) { isHidden = false; break; }
+            if (!occludesFace) { isHidden = false; break; }
           }
           if (isHidden) continue;
 
@@ -2239,6 +2233,7 @@ class GameRenderer {
       const mats = this.getMaterials(type);
       const instancedMesh = new THREE.InstancedMesh(this.boxGeometry, mats, positions.length);
       instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      if (type === 'water') instancedMesh.renderOrder = 1;
 
       for (let i = 0; i < positions.length; i++) {
         const p = positions[i];
@@ -2247,14 +2242,6 @@ class GameRenderer {
         instancedMesh.setMatrixAt(i, dummy.matrix);
       }
       instancedMesh.instanceMatrix.needsUpdate = true;
-      // Translucent water must draw after this chunk's opaque blocks so it
-      // blends against already-drawn solid geometry instead of racing it
-      // (Map iteration order is insertion order, not draw-order-safe).
-      // depthWrite:false (set in getMaterials) means this can't corrupt
-      // the depth buffer for other geometry either way, but correct
-      // ordering still avoids visibly wrong blending against this same
-      // chunk's own opaque blocks.
-      instancedMesh.renderOrder = isWaterBlock(type) ? 1 : 0;
       group.add(instancedMesh);
     }
 
@@ -3077,6 +3064,57 @@ function initUI() {
 }
 
 /* =========================================================================
+   BUCKET INTERACTION
+   ========================================================================= */
+function bucketOccupiesPlayer(pos, cameraPosition) {
+  const px = Math.floor(cameraPosition.x + 0.5);
+  const py = Math.floor(cameraPosition.y - 1.7 + 0.5);
+  const py2 = Math.floor(cameraPosition.y + 0.5);
+  const pz = Math.floor(cameraPosition.z + 0.5);
+  return pos.x === px && pos.z === pz && (pos.y === py || pos.y === py2);
+}
+
+function rebuildDirtyChunksImmediately(renderer) {
+  for (const { chunkX, chunkZ } of WorldGen.consumeDirtyChunks()) {
+    renderer.rebuildChunkMesh(chunkX, chunkZ);
+  }
+}
+
+function useBucketItem(itemId, camera, playerPosition, renderer) {
+  if (!isBucketItem(itemId)) return false;
+
+  const hit = raycast(camera, 5, true);
+  if (!hit) return false;
+
+  const targetType = getBlock(hit.pos.x, hit.pos.y, hit.pos.z);
+
+  if (itemId === 'iron_bucket') {
+    if (targetType !== 'water') return false;
+
+    removeBlock(hit.pos.x, hit.pos.y, hit.pos.z);
+    if (!removeItem('iron_bucket', 1)) {
+      setBlock(hit.pos.x, hit.pos.y, hit.pos.z, 'water');
+      return false;
+    }
+
+    addItem('water_bucket', 1);
+    rebuildDirtyChunksImmediately(renderer);
+    return true;
+  }
+
+  const placePos = hit.pos.clone().add(hit.normal);
+  if (placePos.lengthSq() === 0) return false;
+  if (getBlock(placePos.x, placePos.y, placePos.z)) return false;
+  if (bucketOccupiesPlayer(placePos, playerPosition)) return false;
+
+  if (!removeItem('water_bucket', 1)) return false;
+  setBlock(placePos.x, placePos.y, placePos.z, 'water');
+  addItem('iron_bucket', 1);
+  rebuildDirtyChunksImmediately(renderer);
+  return true;
+}
+
+/* =========================================================================
    MAIN GAME LOOP  (ported from src/game/game.ts)
    ========================================================================= */
 function initGame(canvas, worldOptions) {
@@ -3095,7 +3133,10 @@ function initGame(canvas, worldOptions) {
   // around the spawn point (0, 5) synchronously so spawn ground exists
   // before the first frame renders.
   const __initStart = performance.now();
-  WorldGen.init(worldOptions.seed);
+  WorldGen.init(worldOptions.seed, { persistenceKey: worldOptions.persistenceKey || null });
+  const spawn = WorldGen.findSafeSpawn(0, 0);
+  player.setSpawnPosition(spawn.x, spawn.y, spawn.z);
+  renderer.camera.lookAt(spawn.x, spawn.y, spawn.z - 1);
   console.log('[Terra perf] WorldGen.init:', (performance.now() - __initStart).toFixed(1) + 'ms');
   const __meshStart = performance.now();
   renderer.rebuildAllLoadedChunkMeshes();
@@ -3117,52 +3158,23 @@ function initGame(canvas, worldOptions) {
   // per frame by the loop below instead of all at once (see loop()).
   let pendingMeshRebuilds = [];
 
-  // --- DIAGNOSTIC WATCHDOG -------------------------------------------------
-  // Tracks the last time any checkpoint (in loop() or scheduleChunkGeneration())
-  // updated __dbg, and how long ago that was. A separate setInterval (which
-  // runs as its own browser task, independent of the render loop and of
-  // scheduleChunkGeneration's setTimeout chain) checks the elapsed time and
-  // appends it on-screen. If the main thread is truly stalled somewhere we
-  // haven't instrumented yet, this interval callback will itself stop firing
-  // on time too, and the browser's own "Page Unresponsive" dialog is then the
-  // only remaining signal — but if the interval keeps firing while a
-  // checkpoint goes stale, that pinpoints the stall as happening in a place
-  // this watchdog can still see past, e.g. very heavy but non-blocking work.
-  let __lastCheckpointTime = performance.now();
-  let __lastCheckpointLabel = '(none yet)';
-  function __markCheckpoint(dbgEl, label) {
-    __lastCheckpointTime = performance.now();
-    __lastCheckpointLabel = label;
-    if (dbgEl) dbgEl.textContent = label;
-  }
-  setInterval(() => {
-    const dbgEl = document.getElementById('__dbg');
-    if (!dbgEl) return;
-    const elapsed = performance.now() - __lastCheckpointTime;
-    if (elapsed > 300) {
-      dbgEl.textContent = 'WATCHDOG: no checkpoint update for ' + elapsed.toFixed(0) +
-        'ms (stuck at: ' + __lastCheckpointLabel + ')';
-    }
-  }, 200);
-  // -------------------------------------------------------------------------
+  const flushTerraPersistence = () => {
+    try { WorldGen.flushPersistence(); } catch (_) {}
+  };
+  window.addEventListener('beforeunload', flushTerraPersistence, { once: true });
 
   function loop() {
     animationFrameId = requestAnimationFrame(loop);
 
-    const __dbg = document.getElementById('__dbg');
 
     try {
-      __markCheckpoint(__dbg, 'checkpoint 1: frame start');
 
       const delta = Math.min(clock.getDelta(), 0.1);
 
-      __markCheckpoint(__dbg, 'checkpoint 2: WorldGen.setPlayerPosition');
       WorldGen.setPlayerPosition(player.camera.position.x, player.camera.position.z);
 
-      __markCheckpoint(__dbg, 'checkpoint 3: WorldGen.update');
       WorldGen.update();
 
-      __markCheckpoint(__dbg, 'checkpoint 4: player.update');
       player.update(delta, input);
 
       // World streaming: tell WorldGen where the player is so it can
@@ -3184,18 +3196,15 @@ function initGame(canvas, worldOptions) {
       // next frame's queue instead of draining the whole dirty set at once.
       const MAX_MESH_REBUILDS_PER_FRAME = 1;
 
-      __markCheckpoint(__dbg, 'checkpoint 5: consumeDirtyChunks (queue)');
       for (const { chunkX, chunkZ } of WorldGen.consumeDirtyChunks()) {
         pendingMeshRebuilds.push({ chunkX, chunkZ });
       }
 
-      __markCheckpoint(__dbg, 'checkpoint 6: mesh rebuild drain');
       for (let i = 0; i < MAX_MESH_REBUILDS_PER_FRAME && pendingMeshRebuilds.length > 0; i++) {
         const { chunkX, chunkZ } = pendingMeshRebuilds.shift();
         renderer.rebuildChunkMesh(chunkX, chunkZ);
       }
 
-      __markCheckpoint(__dbg, 'checkpoint 7: consumeUnloadedChunks');
       for (const { chunkX, chunkZ } of WorldGen.consumeUnloadedChunks()) {
         renderer.unloadChunkMesh(chunkX, chunkZ);
         // Drop any still-pending rebuild for a chunk that just got unloaded -
@@ -3205,22 +3214,18 @@ function initGame(canvas, worldOptions) {
         );
       }
 
-      __markCheckpoint(__dbg, 'checkpoint 8: hotbar digit keys');
       const digitKeys = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'];
       const hotbarBlockCount = getHotbarBlockStacks().length;
       for (let i = 0; i < digitKeys.length && i < hotbarBlockCount; i++) {
         if (input.keys[digitKeys[i]] && currentSelectedBlockIndex !== i) setSelectedBlockIndex(i);
       }
 
-      __markCheckpoint(__dbg, 'checkpoint 9: dayNight update');
       dayNight.update(delta);
 
-      __markCheckpoint(__dbg, 'checkpoint 10: raycast');
       const hit = raycast(renderer.camera);
       if (hit) renderer.setOutline(hit.pos);
       else renderer.setOutline(null);
 
-      __markCheckpoint(__dbg, 'checkpoint 11: mining');
       const currentBlockType = hit ? getBlock(hit.pos.x, hit.pos.y, hit.pos.z) : undefined;
       if (!getIsDead() && currentBlockType && hit && input.isHoldingMine) {
         const result = updateMining(true, hit, currentBlockType, delta);
@@ -3244,7 +3249,6 @@ function initGame(canvas, worldOptions) {
         updateMining(false, null, '', delta);
       }
 
-      __markCheckpoint(__dbg, 'checkpoint 12: player stats / death');
       // Hunger drain / starvation damage / passive regen tick.
       updatePlayerStats(delta, !!(player.isMovingInput || input.isHoldingMine));
 
@@ -3256,7 +3260,6 @@ function initGame(canvas, worldOptions) {
         }
       }
 
-      __markCheckpoint(__dbg, 'checkpoint 13: eat food');
       // Eat food (G key / mobile Eat button) — eats the currently selected
       // hotbar item if it's edible.
       if (input.eatTriggered) {
@@ -3268,52 +3271,43 @@ function initGame(canvas, worldOptions) {
         }
       }
 
-      __markCheckpoint(__dbg, 'checkpoint 14: ground items');
       // Proximity pickup of ground items.
       updateGroundItems(delta, player.camera.position);
       renderer.syncDrops(groundItems, clock.getElapsedTime());
 
-      __markCheckpoint(__dbg, 'checkpoint 15: place block');
-      if (!getIsDead() && hit && input.placeTriggered) {
-        const placePos = hit.pos.clone().add(hit.normal);
-        const px = Math.floor(player.camera.position.x + 0.5);
-        const py = Math.floor(player.camera.position.y - 1.7 + 0.5);
-        const py2 = Math.floor(player.camera.position.y + 0.5);
-        const pz = Math.floor(player.camera.position.z + 0.5);
+      if (!getIsDead() && input.placeTriggered) {
+        const hotbarBlocks = getHotbarBlockStacks();
+        const selectedItem = hotbarBlocks[currentSelectedBlockIndex];
 
-        const isPlayer = placePos.x === px && placePos.z === pz && (placePos.y === py || placePos.y === py2);
+        if (isBucketItem(selectedItem)) {
+          useBucketItem(selectedItem, renderer.camera, player.camera.position, renderer);
+        } else if (hit) {
+          const placePos = hit.pos.clone().add(hit.normal);
+          const px = Math.floor(player.camera.position.x + 0.5);
+          const py = Math.floor(player.camera.position.y - 1.7 + 0.5);
+          const py2 = Math.floor(player.camera.position.y + 0.5);
+          const pz = Math.floor(player.camera.position.z + 0.5);
 
-        const targetBlock = getBlock(placePos.x, placePos.y, placePos.z);
-        // Water is non-solid, so a placement target cell containing water is
-        // treated the same as an empty cell (the placed block displaces it) -
-        // otherwise every lake/ocean/river tile would be permanently
-        // unbuildable, which isn't how solid-vs-air placement worked before
-        // water existed as a real block.
-        if (!isPlayer && (!targetBlock || isWaterBlock(targetBlock))) {
-          const hotbarBlocks = getHotbarBlockStacks();
-          const blockType = hotbarBlocks[currentSelectedBlockIndex];
-          // Placing consumes one unit from inventory — no infinite free blocks.
-          // Food items are selectable in the hotbar (to eat) but aren't
-          // placeable, so skip them here.
-          if (blockType && isPlaceableBlock(blockType) && hasItem(blockType, 1)) {
-            setBlock(placePos.x, placePos.y, placePos.z, blockType);
-            removeItem(blockType, 1);
-            // See the mining code above: rebuild the touched chunk(s) right
-            // away instead of waiting for next frame's dirty-chunk sweep.
-            for (const { chunkX, chunkZ } of WorldGen.consumeDirtyChunks()) {
-              renderer.rebuildChunkMesh(chunkX, chunkZ);
-            }
-            // If that was the last one of this stack, snap selection back into
-            // range so the hotbar doesn't point at a now-missing slot.
-            const newStacks = getHotbarBlockStacks();
-            if (currentSelectedBlockIndex >= newStacks.length) {
-              setSelectedBlockIndex(Math.max(0, newStacks.length - 1));
+          const isPlayer = placePos.x === px && placePos.z === pz && (placePos.y === py || placePos.y === py2);
+          const existingPlaceBlock = getBlock(placePos.x, placePos.y, placePos.z);
+
+          if (!isPlayer && (!existingPlaceBlock || existingPlaceBlock === 'water')) {
+            const blockType = selectedItem;
+            // Placing consumes one unit from inventory. Food items are selectable
+            // in the hotbar but are not placeable.
+            if (blockType && isPlaceableBlock(blockType) && hasItem(blockType, 1)) {
+              setBlock(placePos.x, placePos.y, placePos.z, blockType);
+              removeItem(blockType, 1);
+              rebuildDirtyChunksImmediately(renderer);
+              const newStacks = getHotbarBlockStacks();
+              if (currentSelectedBlockIndex >= newStacks.length) {
+                setSelectedBlockIndex(Math.max(0, newStacks.length - 1));
+              }
             }
           }
         }
       }
 
-      __markCheckpoint(__dbg, 'checkpoint 16: crafting toggle');
       if (input.craftingKeyTriggered) {
         setCraftingOpen(!craftingOpen, 'hand');
         if (craftingOpen) {
@@ -3323,7 +3317,6 @@ function initGame(canvas, worldOptions) {
         }
       }
 
-      __markCheckpoint(__dbg, 'checkpoint 17: interact');
       // Interact (F): if not already crafting and looking at a placed
       // Crafting Table / Large Crafting Table within reach, open that tier.
       if (input.interactTriggered && !craftingOpen) {
@@ -3338,21 +3331,13 @@ function initGame(canvas, worldOptions) {
         }
       }
 
-      __markCheckpoint(__dbg, 'checkpoint 18: resetTriggers');
       input.resetTriggers();
 
-      __markCheckpoint(__dbg, 'checkpoint 19: renderer.render');
       renderer.render();
 
-      __markCheckpoint(__dbg, 'checkpoint 20: onReady');
       if (onReady) { const ready = onReady; onReady = null; ready(); }
 
-      __markCheckpoint(__dbg, 'checkpoint 21: frame complete');
     } catch (err) {
-      if (__dbg) {
-        __dbg.textContent = 'FROZEN AT: ' + (__dbg.textContent || '(unknown checkpoint)') +
-          '\nERROR: ' + (err && err.stack ? err.stack : err);
-      }
       console.error('[Terra loop] exception:', err);
     }
   }
@@ -3464,9 +3449,20 @@ function boot() {
   let currentUser = null;
 
   function userWorlds() { return read(worldKey)[currentUser] || []; }
+  function makeWorldId() { return 'w-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+  function ensureWorldIds() {
+    const worlds = read(worldKey);
+    const list = worlds[currentUser] || [];
+    let changed = false;
+    for (const world of list) {
+      if (!world.id) { world.id = makeWorldId(); changed = true; }
+    }
+    if (changed) { worlds[currentUser] = list; write(worldKey, worlds); }
+    return list;
+  }
   function renderWorlds() {
     const list = document.getElementById('worldList');
-    const worlds = userWorlds();
+    const worlds = ensureWorldIds();
     const esc = value => String(value).replace(/[&<>\"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch]));
     list.innerHTML = worlds.length ? worlds.map((world, i) => `<div class="worldRow"><div><strong>${esc(world.name)}</strong><span>Seed ${esc(world.seed)} · Single player</span></div><button type="button" data-world-index="${i}">Play</button></div>`).join('') : '<div class="emptyWorld">No worlds yet. Create one and Terra will generate it before the game opens.</div>';
     list.querySelectorAll('[data-world-index]').forEach(button => button.addEventListener('click', () => startWorld(worlds[Number(button.dataset.worldIndex)])));
@@ -3484,7 +3480,13 @@ function boot() {
       fill.style.width = progress + '%'; value.textContent = progress + '%'; label.textContent = steps[Math.min(steps.length - 1, Math.floor(progress / 26))];
       if (progress >= 100) {
         clearInterval(timer);
-        try { initGame(canvas, { seed: world.seed, onReady: () => requestAnimationFrame(() => launcher.remove()) }); } catch (err) { console.error('Failed to initialise game:', err); launcher.remove(); webglErrorEl.style.display = 'flex'; }
+        try {
+          initGame(canvas, {
+            seed: world.seed,
+            persistenceKey: 'terra.voxels.v1:' + currentUser + ':' + world.id,
+            onReady: () => requestAnimationFrame(() => launcher.remove())
+          });
+        } catch (err) { console.error('Failed to initialise game:', err); launcher.remove(); webglErrorEl.style.display = 'flex'; }
       }
     }, 90);
   }
@@ -3505,7 +3507,7 @@ function boot() {
   document.getElementById('multiplayerMode').addEventListener('click', () => { selectedMode = 'multi'; document.getElementById('multiplayerMode').classList.add('active'); document.getElementById('singlePlayerMode').classList.remove('active'); document.getElementById('multiplayerNotice').hidden = false; renderWorlds(); });
   document.getElementById('createWorld').addEventListener('click', () => {
     if (selectedMode === 'multi') { message('multiplayerNotice', 'Multiplayer needs a live room server. The UI is ready, but this offline build will not pretend localStorage is a network.'); return; }
-    const worlds = read(worldKey); const userWorlds = worlds[currentUser] || []; const world = { name: `World ${userWorlds.length + 1}`, seed: (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0, createdAt: new Date().toISOString() };
+    const worlds = read(worldKey); const userWorlds = worlds[currentUser] || []; const world = { id: makeWorldId(), name: `World ${userWorlds.length + 1}`, seed: (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0, createdAt: new Date().toISOString() };
     userWorlds.push(world); worlds[currentUser] = userWorlds; write(worldKey, worlds); startWorld(world);
   });
   document.getElementById('logout').addEventListener('click', () => { currentUser = null; showView('accountView'); });
