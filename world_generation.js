@@ -36,11 +36,11 @@
     CHUNK_SIZE: 16,          // chunk width/depth in blocks
     WORLD_MIN_Y: -24,        // lowest generated Y (deep caves / bedrock)
     WORLD_MAX_Y: 48,         // highest generated Y (mountain peaks)
-    SEA_LEVEL: 2,            // water surface Y for real voxel water
+    SEA_LEVEL: 2,            // matches the old fixed-world water surface (y=1.65 render, blocks at y<=2)
 
     // Streaming radii, measured in chunks (Chebyshev distance from player chunk).
-    GENERATE_RADIUS: 1,      // chunks generated & rendered around the player
-    RENDER_RADIUS: 1,        // visible chunk radius matches generated radius
+    GENERATE_RADIUS: 2,      // chunks generated & kept as block data
+    RENDER_RADIUS: 1,        // chunks that get meshes built (<= GENERATE_RADIUS)
     UNLOAD_RADIUS: 6,        // chunks farther than this get fully unloaded
 
     // Perf: cap how many NEW chunks we generate in a single update() call so
@@ -56,27 +56,6 @@
       iron:    { min: -10, max: 4,  chance: 0.007 },
       gold:    { min: -18, max: -4, chance: 0.004 },
       diamond: { min: -24, max: -12, chance: 0.002 },
-    },
-
-    // Real voxel water tuning.
-    WATER: {
-      LAKE_CELL_SIZE: 512,
-      LAKE_CHANCE: 0.24,
-      LAKE_MIN_WIDTH: 46,
-      LAKE_MAX_WIDTH: 128,
-      LAKE_MIN_LENGTH: 100,
-      LAKE_MAX_LENGTH: 220,
-      LAKE_MIN_DEPTH: 1,
-      LAKE_MAX_DEPTH: 12,
-      LAKE_EDGE_FREQUENCY: 0.010,
-
-      RIVER_CELL_SIZE: 768,
-      RIVER_HALF_WIDTH: 4.0,
-      RIVER_MAX_DEPTH: 4,
-
-      OCEAN_MIN_DEPTH: 1,
-      OCEAN_MAX_DEPTH: 23,
-      OCEAN_SURFACE_Y: 2,
     },
   };
 
@@ -282,124 +261,78 @@
     return ridgeNoise2D(x, z, { frequency: 0.006, octaves: 5, salt: 4000, gain: 0.55 }); // [0, 1]
   }
 
-  // River/canal field: a signed distance to a finite, deterministic,
-  // gently-winding path inside each large world cell. This avoids broad,
-  // closed FBM contours while retaining natural curvature.
-  function riverPathForCell(cellX, cellZ) {
-    const size = CONFIG.WATER.RIVER_CELL_SIZE;
-    const seedA = hash2(cellX, cellZ, 5001);
-    const seedB = hash2(cellX, cellZ, 5002);
-    const seedC = hash2(cellX, cellZ, 5003);
-    const angle = Math.floor(seedA * 8) * (Math.PI / 8);
-    const phase1 = seedB * Math.PI * 2;
-    const phase2 = seedC * Math.PI * 2;
-    const centerX = cellX * size + size * 0.5;
-    const centerZ = cellZ * size + size * 0.5;
-    return { size, angle, phase1, phase2, centerX, centerZ };
-  }
-
-  function riverDistanceToCell(x, z, cellX, cellZ) {
-    const p = riverPathForCell(cellX, cellZ);
-    const dx = x - p.centerX;
-    const dz = z - p.centerZ;
-    const ca = Math.cos(p.angle);
-    const sa = Math.sin(p.angle);
-    const along = dx * ca + dz * sa;
-    const cross = -dx * sa + dz * ca;
-    const half = p.size * 0.5;
-    const margin = 72;
-
-    if (along < -half + margin || along > half - margin) return null;
-
-    const wobble =
-      Math.sin(along * 0.012 + p.phase1) * 18 +
-      Math.sin(along * 0.023 + p.phase2) * 8;
-
-    return cross - wobble;
-  }
-
+  // River carve value: rivers follow the zero-crossing of a dedicated noise
+  // field, so they form continuous winding paths rather than random strips.
   function riverField(x, z) {
-    const size = CONFIG.WATER.RIVER_CELL_SIZE;
-    const cellX = Math.floor(x / size);
-    const cellZ = Math.floor(z / size);
-    let best = Infinity;
-
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        const d = riverDistanceToCell(x, z, cellX + dx, cellZ + dz);
-        if (d !== null && Math.abs(d) < Math.abs(best)) best = d;
-      }
-    }
-    return best;
+    return fbm2D(x, z, { frequency: 0.004, octaves: 2, salt: 5000 });
   }
 
-  function normalizedLakeNoise(x, z, salt) {
-    return (fbm2D(x, z, {
-      frequency: CONFIG.WATER.LAKE_EDGE_FREQUENCY,
-      octaves: 2,
-      salt: salt,
-    }) + 1) * 0.5;
+  // Lake mask: an independent noise field, sampled at low frequency so
+  // lakes form as natural, multi-chunk-scale landscape features (measured
+  // width ~30-70 blocks typically, up to ~140 for the largest, per
+  // /home/claude/terra/tune_lake3.js sweep against this exact field/
+  // threshold combo) rather than either tiny puddles or a map-wide flood.
+  // They're entirely separate from the ocean/river systems so they can
+  // appear inland, in plains/forest/etc. A per-lake distance falloff
+  // (computed at sample time in terrainHeight) gives each lake a deeper
+  // middle and shallow 1-2 block edges, matching the lake depth spec.
+  function lakeField(x, z) {
+    return fbm2D(x, z, { frequency: 0.010, octaves: 3, salt: 11000, gain: 0.55 });
+  }
+  // 0.60 was chosen by measuring actual connected-region width/length across
+  // a 600-800 block sample area: it produces a handful of lakes per that
+  // area with the largest reaching ~44-67 blocks wide (within the intended
+  // 46-138 block width range) and several smaller ones, at ~1% total
+  // surface coverage - i.e. lakes stay localized, natural-looking features,
+  // not a map-wide flood. Do not lower this without re-measuring region
+  // size (see tune_lake3.js's approach) - the field is very sensitive
+  // near this value (dropping to 0.55 roughly doubled coverage and pushed
+  // the largest lake to 74x64 in the same test).
+  const LAKE_THRESHOLD = 0.60;
+
+  // Returns 0 outside a lake, otherwise a [0,1] "how deep into the lake"
+  // factor (0 at the lake's edge, 1 at its deepest/most-central point),
+  // derived purely from how far the noise value is past the threshold -
+  // deterministic and needs no flood-fill/region tracking.
+  function lakeDepthFactor(x, z) {
+    const n = lakeField(x, z);
+    if (n < LAKE_THRESHOLD) return 0;
+    // Noise rarely gets far past the threshold, so normalize against a
+    // small headroom band above it rather than the full [-1,1] range -
+    // otherwise depthFactor would almost never approach 1.
+    return Math.min(1, (n - LAKE_THRESHOLD) / 0.12);
   }
 
-  // Finite, seeded ellipse-like lake features. Each 512x512 cell may contain
-  // one feature, with deterministic dimensions inside the requested range.
-  function lakeForCell(cellX, cellZ) {
-    const size = CONFIG.WATER.LAKE_CELL_SIZE;
-    if (hash2(cellX, cellZ, 8201) > CONFIG.WATER.LAKE_CHANCE) return null;
-
-    const centerX = cellX * size + size * (0.30 + hash2(cellX, cellZ, 8202) * 0.40);
-    const centerZ = cellZ * size + size * (0.30 + hash2(cellX, cellZ, 8203) * 0.40);
-    const width = CONFIG.WATER.LAKE_MIN_WIDTH +
-      hash2(cellX, cellZ, 8204) * (CONFIG.WATER.LAKE_MAX_WIDTH - CONFIG.WATER.LAKE_MIN_WIDTH);
-    const length = CONFIG.WATER.LAKE_MIN_LENGTH +
-      hash2(cellX, cellZ, 8205) * (CONFIG.WATER.LAKE_MAX_LENGTH - CONFIG.WATER.LAKE_MIN_LENGTH);
-    const angle = hash2(cellX, cellZ, 8206) * Math.PI;
-
-    return {
-      centerX,
-      centerZ,
-      radiusX: length * 0.5,
-      radiusZ: width * 0.5,
-      angle,
-      salt: 8300 + Math.abs((cellX * 73856093) ^ (cellZ * 19349663)),
-    };
+  // Narrow canal/river-like water: an explicit winding PATH (not a raw
+  // zero-crossing contour of unconstrained 2D noise, which forms closed
+  // loops that balloon to huge width wherever the contour curves back on
+  // itself - confirmed by direct visualization while tuning this). Instead,
+  // for every Z we compute a single target X via low-frequency 1D noise, so
+  // the canal is guaranteed to be a single-valued, snake-like line running
+  // predominantly along Z (never loops back on itself), then measure actual
+  // perpendicular-ish distance from that line. This is the same technique
+  // used for actual river/canal generation in most voxel terrain
+  // generators, and keeps width bounded regardless of local noise slope.
+  function canalCenterX(z) {
+    // Low frequency -> long, slow drifts (a winding but not jagged path).
+    // Amplitude controls how far the canal can wander in X.
+    return valueNoise2D(z * 0.006, 777, 12500) * 60;
   }
-
-  function lakeInfoAt(x, z) {
-    const size = CONFIG.WATER.LAKE_CELL_SIZE;
-    const cellX = Math.floor(x / size);
-    const cellZ = Math.floor(z / size);
-    let best = null;
-
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        const lake = lakeForCell(cellX + dx, cellZ + dz);
-        if (!lake) continue;
-
-        const lx = x - lake.centerX;
-        const lz = z - lake.centerZ;
-        const ca = Math.cos(lake.angle);
-        const sa = Math.sin(lake.angle);
-        const along = lx * ca + lz * sa;
-        const cross = -lx * sa + lz * ca;
-        const ellipse = Math.sqrt(
-          (along * along) / (lake.radiusX * lake.radiusX) +
-          (cross * cross) / (lake.radiusZ * lake.radiusZ)
-        );
-
-        const edgeNoise = 1 + (normalizedLakeNoise(x, z, lake.salt) - 0.5) * 0.10;
-        const normalized = ellipse / edgeNoise;
-        if (normalized > 1) continue;
-
-        if (!best || normalized < best.normalized) best = { normalized };
-      }
-    }
-
-    if (!best) return null;
-    return {
-      normalized: best.normalized,
-      strength: Math.max(0, Math.min(1, 1 - best.normalized)),
-    };
+  // Canals are finite-length features, not infinite lines across the whole
+  // map: a separate, very-low-frequency "existence" noise gates long
+  // stretches of Z on/off, so any single canal instance runs for roughly a
+  // few hundred blocks (well within the 100+ "can be" range, but bounded)
+  // before the gate closes and that Z-band has no canal at all.
+  function canalExists(z) {
+    return valueNoise2D(z * 0.0012, 333, 12600) > 0.15;
+  }
+  const CANAL_HALF_WIDTH = 3.5; // blocks from centerline to bank
+  function canalDepthFactor(x, z) {
+    if (!canalExists(z)) return 0;
+    const centerX = canalCenterX(z);
+    const distBlocks = Math.abs(x - centerX);
+    if (distBlocks > CANAL_HALF_WIDTH) return 0;
+    return 1 - distBlocks / CANAL_HALF_WIDTH; // 1 at the centerline, 0 at the bank
   }
 
   const CONTINENT = {
@@ -424,7 +357,7 @@
      surface-block swap.
      ====================================================================== */
   const BIOMES = {
-    OCEAN:        { id: 'ocean', baseHeight: 0, roughness: 0.3, surface: 'sand', sub: 'sand', underground: 'stone',
+    OCEAN:        { id: 'ocean', baseHeight: -6, roughness: 0.3, surface: 'sand', sub: 'sand', underground: 'stone',
                      treeDensity: 0, treeType: null, vegDensity: 0, snow: false },
     RIVER:        { id: 'river', baseHeight: 1, roughness: 0.2, surface: 'sand', sub: 'sand', underground: 'stone',
                      treeDensity: 0, treeType: null, vegDensity: 0.02, snow: false },
@@ -462,8 +395,7 @@
     if (zone === 'deep_ocean' || zone === 'ocean') return BIOMES.OCEAN;
 
     const river = riverField(x, z);
-    const isRiver = Math.abs(river) <= CONFIG.WATER.RIVER_HALF_WIDTH &&
-      zone !== 'coast' && zone !== 'ocean' && zone !== 'deep_ocean';
+    const isRiver = Math.abs(river) < 0.02 && zone !== 'coast';
     if (isRiver) return BIOMES.RIVER;
 
     if (zone === 'coast') return BIOMES.BEACH;
@@ -517,23 +449,49 @@
       height += Math.pow(mtn, 2) * 26 + ridgeDetail * mtn * 4;
     }
 
-    // Ocean floor slopes from a 2-block shoreline into a 23-block interior.
-    // The transition follows the continentalness bands so deep-ocean regions
-    // remain genuinely deep without creating an abrupt trench at the coast.
+    // Ocean floor slopes down smoothly from coast to deep ocean rather than
+    // a hard step, so coastlines feel natural. depthT=0 right at the coast
+    // edge (continentalness == CONTINENT.OCEAN) ramps to depthT=1 by
+    // CONTINENT.DEEP_OCEAN (the actual boundary of the deep_ocean zone, not
+    // an arbitrary distance - using the real zone width means genuinely
+    // deep-ocean-interior columns actually reach the deep end of the range
+    // instead of topping out partway there), and floor depth below
+    // SEA_LEVEL is driven directly from that so shoreline water reliably
+    // ends up 1-2 blocks deep and the ocean interior lands in the 16-23
+    // block range (per water-gen spec) regardless of biome.baseHeight.
     if (biome.id === 'ocean') {
-      const depthT = Math.min(1, Math.max(0,
-        (CONTINENT.OCEAN - c) / (CONTINENT.OCEAN - CONTINENT.DEEP_OCEAN)
-      ));
-      const targetDepth = CONFIG.WATER.OCEAN_MIN_DEPTH +
-        depthT * (CONFIG.WATER.OCEAN_MAX_DEPTH - CONFIG.WATER.OCEAN_MIN_DEPTH);
-      height = CONFIG.WATER.OCEAN_SURFACE_Y - targetDepth;
+      const oceanSpan = CONTINENT.OCEAN - CONTINENT.DEEP_OCEAN; // > 0
+      const depthT = Math.min(1, Math.max(0, (CONTINENT.OCEAN - c) / oceanSpan));
+      const floorDepth = lerp(1, 23, depthT); // blocks below sea level
+      height = CONFIG.SEA_LEVEL - floorDepth;
     }
 
-    // Rivers carve a shallow channel toward sea level with a deeper center.
+    // Rivers carve a channel toward sea level with a deeper center, capped
+    // to the 1-4 block canal/river depth range from the water-gen spec.
     if (biome.id === 'river') {
       const river = riverField(x, z);
-      const centerT = 1 - Math.min(1, Math.abs(river) / CONFIG.WATER.RIVER_HALF_WIDTH);
-      height = lerp(height, CONFIG.SEA_LEVEL - 3, centerT);
+      const centerT = 1 - Math.min(1, Math.abs(river) / 0.02);
+      const floorDepth = lerp(1, 4, centerT);
+      height = Math.min(height, CONFIG.SEA_LEVEL - floorDepth);
+    }
+
+    // Standalone lakes: independent of biome, so they can carve into any
+    // land biome's terrain. Edge blocks stay shallow (1-2 deep), the
+    // lake's deepest point reaches 4-12 deep, per the water-gen spec.
+    const lakeT = lakeDepthFactor(x, z);
+    if (lakeT > 0 && biome.id !== 'ocean' && biome.id !== 'river') {
+      const floorDepth = lerp(1, 12, lakeT);
+      const lakeFloorHeight = CONFIG.SEA_LEVEL - floorDepth;
+      if (lakeFloorHeight < height) height = lakeFloorHeight;
+    }
+
+    // Narrow canals: independent linear cuts through any land biome, kept
+    // shallow (1-4 deep) and narrow via canalDepthFactor's tight band.
+    const canalT = canalDepthFactor(x, z);
+    if (canalT > 0 && biome.id !== 'ocean' && biome.id !== 'river') {
+      const floorDepth = lerp(1, 4, canalT);
+      const canalFloorHeight = CONFIG.SEA_LEVEL - floorDepth;
+      if (canalFloorHeight < height) height = canalFloorHeight;
     }
 
     return Math.round(height);
@@ -746,82 +704,14 @@
         liveSize -= count;
         return count;
       },
+      // Diagnostics only (not part of the original Map API).
+      _shardCount() { return shards.size; },
     };
   }
 
   const worldMap = global.worldMap || createShardedBlockMap(CONFIG.CHUNK_SIZE); // "x,y,z" -> blockType (shared with index.html), sharded per-chunk internally
   const dirtyChunks = new Set();     // chunk keys touched since last consume (for mesh rebuild)
   const unloadedChunks = new Set();  // chunk keys unloaded since last consume (for mesh teardown)
-
-  // Edited voxel persistence. Only player edits are stored, never generated
-  // terrain, so deterministic generation remains the source of truth for
-  // untouched coordinates. A null value means the generated block was removed.
-  let persistenceKey = null;
-  let savedEdits = new Map();
-  let persistenceWriteTimer = null;
-  let generationInProgress = false;
-
-  function loadSavedEdits() {
-    savedEdits = new Map();
-    if (!persistenceKey || typeof localStorage === 'undefined') return;
-    try {
-      const raw = localStorage.getItem(persistenceKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      const edits = parsed && parsed.edits && typeof parsed.edits === 'object' ? parsed.edits : {};
-      for (const key of Object.keys(edits)) {
-        const value = edits[key];
-        if (value === null || typeof value === 'string') savedEdits.set(key, value);
-      }
-    } catch (err) {
-      console.warn('[Terra persistence] failed to load voxel edits:', err);
-    }
-  }
-
-  function flushSavedEdits() {
-    persistenceWriteTimer = null;
-    if (!persistenceKey || typeof localStorage === 'undefined') return;
-    try {
-      const edits = {};
-      for (const [key, value] of savedEdits.entries()) edits[key] = value;
-      localStorage.setItem(persistenceKey, JSON.stringify({ version: 1, edits }));
-    } catch (err) {
-      console.warn('[Terra persistence] failed to save voxel edits:', err);
-    }
-  }
-
-  function schedulePersistenceSave() {
-    if (!persistenceKey || typeof localStorage === 'undefined') return;
-    if (persistenceWriteTimer !== null) return;
-    persistenceWriteTimer = setTimeout(flushSavedEdits, 250);
-  }
-
-  function recordEdit(x, y, z, type) {
-    if (generationInProgress || !persistenceKey) return;
-    savedEdits.set(getBlockKey(x, y, z), type);
-    schedulePersistenceSave();
-  }
-
-  function applySavedEditsToChunk(chunkX, chunkZ) {
-    if (savedEdits.size === 0) return false;
-    const baseX = chunkX * CONFIG.CHUNK_SIZE;
-    const baseZ = chunkZ * CONFIG.CHUNK_SIZE;
-    const maxX = baseX + CONFIG.CHUNK_SIZE - 1;
-    const maxZ = baseZ + CONFIG.CHUNK_SIZE - 1;
-    let changed = false;
-    for (const [key, value] of savedEdits.entries()) {
-      const first = key.indexOf(',');
-      const second = key.indexOf(',', first + 1);
-      if (first < 0 || second < 0) continue;
-      const x = Number(key.slice(0, first));
-      const z = Number(key.slice(second + 1));
-      if (x < baseX || x > maxX || z < baseZ || z > maxZ) continue;
-      if (value === null) worldMap.delete(key);
-      else worldMap.set(key, value);
-      changed = true;
-    }
-    return changed;
-  }
 
   function getBlockKey(x, y, z) {
     return Math.floor(x) + ',' + Math.floor(y) + ',' + Math.floor(z);
@@ -845,16 +735,12 @@
     return worldMap.get(getBlockKey(x, y, z));
   }
   function setBlock(x, y, z, type) {
-    const key = getBlockKey(x, y, z);
-    worldMap.set(key, type);
+    worldMap.set(getBlockKey(x, y, z), type);
     markDirtyAtBlock(x, z);
-    recordEdit(x, y, z, type);
   }
   function removeBlock(x, y, z) {
-    const key = getBlockKey(x, y, z);
-    worldMap.delete(key);
+    worldMap.delete(getBlockKey(x, y, z));
     markDirtyAtBlock(x, z);
-    recordEdit(x, y, z, null);
   }
 
   /* ======================================================================
@@ -929,7 +815,7 @@
   function placeHouse(hx, hz, wallMaterial) {
     const groundY = terrainHeight(hx, hz, selectBiome(hx, hz));
     if (getBiomeAt(hx, hz).id === 'ocean' || getBiomeAt(hx, hz).id === 'river') return; // avoid water
-    if (getBlock(hx, groundY, hz) === 'water') return; // avoid inland lakes too
+    if (groundY < CONFIG.SEA_LEVEL) return; // avoid standalone lake/canal cuts too
 
     for (let x = hx; x < hx + 6; x++) {
       for (let z = hz; z < hz + 5; z++) {
@@ -974,98 +860,6 @@
   function getHeightAt(x, z) { return getColumnData(x, z).height; }
 
   /* ======================================================================
-     SAFE OVERGROUND SPAWN
-     Find a deterministic land column with clear headroom.
-     ====================================================================== */
-  function findSafeSpawn(originX, originZ) {
-    function plausibleLand(x, z) {
-      const data = getColumnData(x, z);
-      if (data.biome.id === 'ocean' || data.biome.id === 'river' || data.height < 2) return null;
-      const lake = lakeInfoAt(x, z);
-      if (lake && continentZone(continentalness(x, z)) === 'inland' && data.height <= 8) return null;
-      return data;
-    }
-
-    function findSafeInChunk(chunkX, chunkZ) {
-      generateChunk(chunkX, chunkZ);
-      const baseX = chunkX * CONFIG.CHUNK_SIZE;
-      const baseZ = chunkZ * CONFIG.CHUNK_SIZE;
-      for (let lx = 0; lx < CONFIG.CHUNK_SIZE; lx++) {
-        for (let lz = 0; lz < CONFIG.CHUNK_SIZE; lz++) {
-          const x = baseX + lx;
-          const z = baseZ + lz;
-          const data = plausibleLand(x, z);
-          if (!data) continue;
-          const ground = getBlock(x, data.height, z);
-          const head = getBlock(x, data.height + 1, z);
-          const head2 = getBlock(x, data.height + 2, z);
-          if (!ground || ground === 'water' || head || head2) continue;
-
-          // A mathematically clear 1x1 column is not enough for a playable
-          // spawn. The player has a horizontal collision footprint, so a
-          // position boxed in by nearby walls can still be immobile. Require
-          // a small open 3x3 pocket around the player at body and head height,
-          // and solid walkable ground across that same footprint.
-          let openPocket = true;
-          for (let ox = -1; ox <= 1 && openPocket; ox++) {
-            for (let oz = -1; oz <= 1; oz++) {
-              const gx = x + ox, gz = z + oz;
-              const nearbyGround = getBlock(gx, data.height, gz);
-              const nearbyBody = getBlock(gx, data.height + 1, gz);
-              const nearbyHead = getBlock(gx, data.height + 2, gz);
-              if (!nearbyGround || nearbyGround === 'water' || nearbyBody || nearbyHead) {
-                openPocket = false;
-                break;
-              }
-            }
-          }
-          if (openPocket) {
-            return { x, y: data.height + 1.72, z, groundY: data.height };
-          }
-        }
-      }
-      return null;
-    }
-
-    // First try a dense local search so most worlds still spawn close to the origin.
-    for (let r = 0; r <= 64; r++) {
-      for (let dx = -r; dx <= r; dx++) {
-        const dz = r - Math.abs(dx);
-        const dzValues = dz === 0 ? [0] : [-dz, dz];
-        for (const signedDz of dzValues) {
-          const x = Math.floor(originX) + dx;
-          const z = Math.floor(originZ) + signedDz;
-          if (!plausibleLand(x, z)) continue;
-          const [cx, cz] = worldToChunk(x, z);
-          const safe = findSafeInChunk(cx, cz);
-          if (safe) return safe;
-        }
-      }
-    }
-
-    // Some seeds can begin inside a very large ocean region. Use a coarse,
-    // deterministic world search rather than ever spawning in water.
-    const coarseRadius = 1024;
-    const step = CONFIG.CHUNK_SIZE;
-    for (let r = 80; r <= coarseRadius; r += step) {
-      for (let dx = -r; dx <= r; dx += step) {
-        const dz = r - Math.abs(dx);
-        const dzValues = dz === 0 ? [0] : [-dz, dz];
-        for (const signedDz of dzValues) {
-          const x = Math.floor(originX / step) * step + dx;
-          const z = Math.floor(originZ / step) * step + signedDz;
-          if (!plausibleLand(x, z)) continue;
-          const [cx, cz] = worldToChunk(x, z);
-          const safe = findSafeInChunk(cx, cz);
-          if (safe) return safe;
-        }
-      }
-    }
-
-    throw new Error('Unable to find a dry overground spawn within 1024 blocks of the world origin');
-  }
-
-  /* ======================================================================
      TERRAIN GENERATOR: generateChunk(chunkX, chunkZ, seed)
      Deterministic: same chunkX/chunkZ/seed always produce the same blocks.
      ====================================================================== */
@@ -1080,7 +874,6 @@
       return chunk; // already generated - don't regenerate (idempotent load)
     }
     chunk.state = ChunkState.GENERATING;
-    generationInProgress = true;
 
     const baseX = chunkX * CONFIG.CHUNK_SIZE;
     const baseZ = chunkZ * CONFIG.CHUNK_SIZE;
@@ -1102,8 +895,11 @@
           }
 
           if (isCave(x, y, z) && y < height - 1) {
-            if (isUndergroundLake(x, y, z)) setBlockRaw(x, y, z, 'gravel');
-            continue; // leave as air (or water) in the cave
+            // Underground lake pockets: fill with real water blocks (bounded
+            // by the surrounding cave walls, so this can't spill/flood the
+            // whole cave network) instead of leaving them as air.
+            if (isUndergroundLake(x, y, z)) setBlockRaw(x, y, z, 'water');
+            continue; // leave as air (cave)
           }
 
           let blockType;
@@ -1123,35 +919,16 @@
           setBlockRaw(x, y, z, blockType);
         }
 
-        // Real voxel water generation.
-        if (biome.id === 'ocean') {
-          const surfaceY = CONFIG.WATER.OCEAN_SURFACE_Y;
-          for (let wy = height + 1; wy <= surfaceY; wy++) {
-            setBlockRaw(x, wy, z, 'water');
-          }
-        } else if (biome.id === 'river') {
-          const surfaceY = CONFIG.WATER.OCEAN_SURFACE_Y;
-          for (let wy = height + 1; wy <= surfaceY; wy++) {
-            if (wy - height > CONFIG.WATER.RIVER_MAX_DEPTH) break;
-            setBlockRaw(x, wy, z, 'water');
-          }
-        } else {
-          const c = continentalness(x, z);
-          const lake = lakeInfoAt(x, z);
-          const zone = continentZone(c);
-          if (lake && zone === 'inland' && height <= 8) {
-            const depth = Math.max(
-              CONFIG.WATER.LAKE_MIN_DEPTH,
-              Math.min(
-                CONFIG.WATER.LAKE_MAX_DEPTH,
-                CONFIG.WATER.LAKE_MIN_DEPTH +
-                  Math.floor(lake.strength * (CONFIG.WATER.LAKE_MAX_DEPTH - CONFIG.WATER.LAKE_MIN_DEPTH + 1))
-              )
-            );
-            const floorY = Math.max(CONFIG.WORLD_MIN_Y + 1, height - depth + 1);
-            for (let wy = floorY; wy <= height; wy++) {
-              setBlockRaw(x, wy, z, 'water');
-            }
+        // Water fill: for any column whose terrain surface sits below sea
+        // level (ocean, river, standalone lake, or canal - all of which
+        // lower `height` in terrainHeight() above), fill the gap between the
+        // surface and sea level with real 'water' blocks instead of leaving
+        // it as air. This makes water an actual voxel/block type that is
+        // generated as terrain and survives chunk rebuilds like any other
+        // block, rather than a fake full-scene visual plane.
+        if (height < CONFIG.SEA_LEVEL) {
+          for (let y = height + 1; y <= CONFIG.SEA_LEVEL; y++) {
+            if (!getBlock(x, y, z)) setBlockRaw(x, y, z, 'water');
           }
         }
       }
@@ -1164,16 +941,16 @@
         const z = baseZ + lz;
         const { biome, height } = getColumnData(x, z);
         if (biome.id === 'ocean' || biome.id === 'river') continue;
-        if (getBlock(x, height, z) === 'water') continue;
+        // Skip columns submerged by a standalone lake/canal cut too - the
+        // surface here is underwater, so trees/ground vegetation shouldn't
+        // try to grow from it.
+        if (height < CONFIG.SEA_LEVEL) continue;
         generateVegetationForColumn(x, z, height, biome);
       }
     }
 
     // Structure pass (deterministic, ~one roll per chunk).
     if (structureBiome) tryPlaceStructure(chunkX, chunkZ, structureBiome);
-
-    generationInProgress = false;
-    if (applySavedEditsToChunk(chunkX, chunkZ)) dirtyChunks.add(key);
 
     chunk.state = ChunkState.GENERATED;
     dirtyChunks.add(key);
@@ -1281,6 +1058,7 @@
   // inside requestAnimationFrame every frame — so as long as any chunk was
   // missing (e.g. all ~25 chunks around a fresh spawn), every single
   // animation frame paid a full chunk's cost, which still reads as a
+  // sustained unresponsive stretch to the browser's watchdog.
   //
   // The actual fix: stop generating chunks from inside the render loop's
   // call stack entirely. update() now only ever *schedules* generation via
@@ -1315,25 +1093,40 @@
   function scheduleChunkGeneration() {
     if (chunkGenScheduled) return; // already have one queued/running
     chunkGenScheduled = true;
+    const __dbg = (typeof document !== 'undefined') ? document.getElementById('__dbg') : null;
+    if (__dbg) __dbg.textContent = 'checkpoint SCG-1: setTimeout scheduled';
     setTimeout(() => {
       try {
+        if (__dbg) __dbg.textContent = 'checkpoint SCG-2: timeout fired';
         chunkGenScheduled = false;
         const missing = getMissingChunksWithinRadius(CONFIG.GENERATE_RADIUS);
+        if (__dbg) __dbg.textContent = 'checkpoint SCG-3: got missing list (' + missing.length + ')';
         if (missing.length === 0) {
+          if (__dbg) __dbg.textContent = 'checkpoint SCG-4: nothing missing, done';
           return;
         }
         const [, cx, cz] = missing[0];
         const key = chunkKey(cx, cz);
+        if (__dbg) __dbg.textContent = 'checkpoint SCG-5: calling generateChunk(' + cx + ',' + cz + ')';
         generateChunk(cx, cz);
+        if (__dbg) __dbg.textContent = 'checkpoint SCG-6: generateChunk returned';
         const chunk = chunks.get(key);
         if (chunk) chunk.state = ChunkState.LOADED;
         // More chunks may still be missing - queue the next one. This keeps
         // going independently of the render loop's frame cadence.
+        if (__dbg) __dbg.textContent = 'checkpoint SCG-7: checking for more missing';
         if (getMissingChunksWithinRadius(CONFIG.GENERATE_RADIUS).length > 0) {
+          if (__dbg) __dbg.textContent = 'checkpoint SCG-8: rescheduling';
           scheduleChunkGeneration();
+        } else {
+          if (__dbg) __dbg.textContent = 'checkpoint SCG-9: done, nothing more missing';
         }
       } catch (err) {
         chunkGenScheduled = false;
+        if (__dbg) {
+          __dbg.textContent = 'FROZEN IN scheduleChunkGeneration AT: ' + (__dbg.textContent || '(unknown)') +
+            '\nERROR: ' + (err && err.stack ? err.stack : err);
+        }
         console.error('[Terra scheduleChunkGeneration] exception:', err);
       }
     }, 0);
@@ -1376,13 +1169,8 @@
   /* ======================================================================
      PUBLIC API
      ====================================================================== */
-  function init(seed, options) {
-    options = options || {};
+  function init(seed) {
     setSeed(seed !== undefined ? seed : Date.now());
-    persistenceKey = options.persistenceKey || null;
-    loadSavedEdits();
-    if (persistenceWriteTimer !== null) { clearTimeout(persistenceWriteTimer); persistenceWriteTimer = null; }
-    generationInProgress = false;
     worldMap.clear();
     chunks.clear();
     dirtyChunks.clear();
@@ -1401,8 +1189,6 @@
     ChunkState,
     init,
     setSeed,
-    findSafeSpawn,
-    flushPersistence: flushSavedEdits,
     setPlayerPosition,
     update,
     consumeDirtyChunks,
