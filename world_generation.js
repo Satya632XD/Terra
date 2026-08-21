@@ -39,8 +39,8 @@
     SEA_LEVEL: 2,            // water surface Y for real voxel water
 
     // Streaming radii, measured in chunks (Chebyshev distance from player chunk).
-    GENERATE_RADIUS: 2,      // chunks generated & kept as block data
-    RENDER_RADIUS: 1,        // chunks that get meshes built (<= GENERATE_RADIUS)
+    GENERATE_RADIUS: 1,      // chunks generated & rendered around the player
+    RENDER_RADIUS: 1,        // visible chunk radius matches generated radius
     UNLOAD_RADIUS: 6,        // chunks farther than this get fully unloaded
 
     // Perf: cap how many NEW chunks we generate in a single update() call so
@@ -753,6 +753,76 @@
   const dirtyChunks = new Set();     // chunk keys touched since last consume (for mesh rebuild)
   const unloadedChunks = new Set();  // chunk keys unloaded since last consume (for mesh teardown)
 
+  // Edited voxel persistence. Only player edits are stored, never generated
+  // terrain, so deterministic generation remains the source of truth for
+  // untouched coordinates. A null value means the generated block was removed.
+  let persistenceKey = null;
+  let savedEdits = new Map();
+  let persistenceWriteTimer = null;
+  let generationInProgress = false;
+
+  function loadSavedEdits() {
+    savedEdits = new Map();
+    if (!persistenceKey || typeof localStorage === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(persistenceKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const edits = parsed && parsed.edits && typeof parsed.edits === 'object' ? parsed.edits : {};
+      for (const key of Object.keys(edits)) {
+        const value = edits[key];
+        if (value === null || typeof value === 'string') savedEdits.set(key, value);
+      }
+    } catch (err) {
+      console.warn('[Terra persistence] failed to load voxel edits:', err);
+    }
+  }
+
+  function flushSavedEdits() {
+    persistenceWriteTimer = null;
+    if (!persistenceKey || typeof localStorage === 'undefined') return;
+    try {
+      const edits = {};
+      for (const [key, value] of savedEdits.entries()) edits[key] = value;
+      localStorage.setItem(persistenceKey, JSON.stringify({ version: 1, edits }));
+    } catch (err) {
+      console.warn('[Terra persistence] failed to save voxel edits:', err);
+    }
+  }
+
+  function schedulePersistenceSave() {
+    if (!persistenceKey || typeof localStorage === 'undefined') return;
+    if (persistenceWriteTimer !== null) return;
+    persistenceWriteTimer = setTimeout(flushSavedEdits, 250);
+  }
+
+  function recordEdit(x, y, z, type) {
+    if (generationInProgress || !persistenceKey) return;
+    savedEdits.set(getBlockKey(x, y, z), type);
+    schedulePersistenceSave();
+  }
+
+  function applySavedEditsToChunk(chunkX, chunkZ) {
+    if (savedEdits.size === 0) return false;
+    const baseX = chunkX * CONFIG.CHUNK_SIZE;
+    const baseZ = chunkZ * CONFIG.CHUNK_SIZE;
+    const maxX = baseX + CONFIG.CHUNK_SIZE - 1;
+    const maxZ = baseZ + CONFIG.CHUNK_SIZE - 1;
+    let changed = false;
+    for (const [key, value] of savedEdits.entries()) {
+      const first = key.indexOf(',');
+      const second = key.indexOf(',', first + 1);
+      if (first < 0 || second < 0) continue;
+      const x = Number(key.slice(0, first));
+      const z = Number(key.slice(second + 1));
+      if (x < baseX || x > maxX || z < baseZ || z > maxZ) continue;
+      if (value === null) worldMap.delete(key);
+      else worldMap.set(key, value);
+      changed = true;
+    }
+    return changed;
+  }
+
   function getBlockKey(x, y, z) {
     return Math.floor(x) + ',' + Math.floor(y) + ',' + Math.floor(z);
   }
@@ -775,12 +845,16 @@
     return worldMap.get(getBlockKey(x, y, z));
   }
   function setBlock(x, y, z, type) {
-    worldMap.set(getBlockKey(x, y, z), type);
+    const key = getBlockKey(x, y, z);
+    worldMap.set(key, type);
     markDirtyAtBlock(x, z);
+    recordEdit(x, y, z, type);
   }
   function removeBlock(x, y, z) {
-    worldMap.delete(getBlockKey(x, y, z));
+    const key = getBlockKey(x, y, z);
+    worldMap.delete(key);
     markDirtyAtBlock(x, z);
+    recordEdit(x, y, z, null);
   }
 
   /* ======================================================================
@@ -900,6 +974,78 @@
   function getHeightAt(x, z) { return getColumnData(x, z).height; }
 
   /* ======================================================================
+     SAFE OVERGROUND SPAWN
+     Find a deterministic land column with clear headroom.
+     ====================================================================== */
+  function findSafeSpawn(originX, originZ) {
+    function plausibleLand(x, z) {
+      const data = getColumnData(x, z);
+      if (data.biome.id === 'ocean' || data.biome.id === 'river' || data.height < 2) return null;
+      const lake = lakeInfoAt(x, z);
+      if (lake && continentZone(continentalness(x, z)) === 'inland' && data.height <= 8) return null;
+      return data;
+    }
+
+    function findSafeInChunk(chunkX, chunkZ) {
+      generateChunk(chunkX, chunkZ);
+      const baseX = chunkX * CONFIG.CHUNK_SIZE;
+      const baseZ = chunkZ * CONFIG.CHUNK_SIZE;
+      for (let lx = 0; lx < CONFIG.CHUNK_SIZE; lx++) {
+        for (let lz = 0; lz < CONFIG.CHUNK_SIZE; lz++) {
+          const x = baseX + lx;
+          const z = baseZ + lz;
+          const data = plausibleLand(x, z);
+          if (!data) continue;
+          const ground = getBlock(x, data.height, z);
+          const head = getBlock(x, data.height + 1, z);
+          const head2 = getBlock(x, data.height + 2, z);
+          if (ground && ground !== 'water' && !head && !head2) {
+            return { x, y: data.height + 1.7, z, groundY: data.height };
+          }
+        }
+      }
+      return null;
+    }
+
+    // First try a dense local search so most worlds still spawn close to the origin.
+    for (let r = 0; r <= 64; r++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const dz = r - Math.abs(dx);
+        const dzValues = dz === 0 ? [0] : [-dz, dz];
+        for (const signedDz of dzValues) {
+          const x = Math.floor(originX) + dx;
+          const z = Math.floor(originZ) + signedDz;
+          if (!plausibleLand(x, z)) continue;
+          const [cx, cz] = worldToChunk(x, z);
+          const safe = findSafeInChunk(cx, cz);
+          if (safe) return safe;
+        }
+      }
+    }
+
+    // Some seeds can begin inside a very large ocean region. Use a coarse,
+    // deterministic world search rather than ever spawning in water.
+    const coarseRadius = 1024;
+    const step = CONFIG.CHUNK_SIZE;
+    for (let r = 80; r <= coarseRadius; r += step) {
+      for (let dx = -r; dx <= r; dx += step) {
+        const dz = r - Math.abs(dx);
+        const dzValues = dz === 0 ? [0] : [-dz, dz];
+        for (const signedDz of dzValues) {
+          const x = Math.floor(originX / step) * step + dx;
+          const z = Math.floor(originZ / step) * step + signedDz;
+          if (!plausibleLand(x, z)) continue;
+          const [cx, cz] = worldToChunk(x, z);
+          const safe = findSafeInChunk(cx, cz);
+          if (safe) return safe;
+        }
+      }
+    }
+
+    throw new Error('Unable to find a dry overground spawn within 1024 blocks of the world origin');
+  }
+
+  /* ======================================================================
      TERRAIN GENERATOR: generateChunk(chunkX, chunkZ, seed)
      Deterministic: same chunkX/chunkZ/seed always produce the same blocks.
      ====================================================================== */
@@ -914,6 +1060,7 @@
       return chunk; // already generated - don't regenerate (idempotent load)
     }
     chunk.state = ChunkState.GENERATING;
+    generationInProgress = true;
 
     const baseX = chunkX * CONFIG.CHUNK_SIZE;
     const baseZ = chunkZ * CONFIG.CHUNK_SIZE;
@@ -1004,6 +1151,9 @@
 
     // Structure pass (deterministic, ~one roll per chunk).
     if (structureBiome) tryPlaceStructure(chunkX, chunkZ, structureBiome);
+
+    generationInProgress = false;
+    if (applySavedEditsToChunk(chunkX, chunkZ)) dirtyChunks.add(key);
 
     chunk.state = ChunkState.GENERATED;
     dirtyChunks.add(key);
@@ -1108,7 +1258,7 @@
   // vegetation) even after trimming noise octaves, which is still far more
   // than a 16ms frame budget. The previous attempt still called
   // generateChunk() directly from WorldGen.update(), which itself runs
-  // inside requestAnimationFrame every frame — so as long as any chunk was
+  // inside requestAnimationFrame every frame ��� so as long as any chunk was
   // missing (e.g. all ~25 chunks around a fresh spawn), every single
   // animation frame paid a full chunk's cost, which still reads as a
   //
@@ -1206,8 +1356,13 @@
   /* ======================================================================
      PUBLIC API
      ====================================================================== */
-  function init(seed) {
+  function init(seed, options) {
+    options = options || {};
     setSeed(seed !== undefined ? seed : Date.now());
+    persistenceKey = options.persistenceKey || null;
+    loadSavedEdits();
+    if (persistenceWriteTimer !== null) { clearTimeout(persistenceWriteTimer); persistenceWriteTimer = null; }
+    generationInProgress = false;
     worldMap.clear();
     chunks.clear();
     dirtyChunks.clear();
@@ -1226,6 +1381,8 @@
     ChunkState,
     init,
     setSeed,
+    findSafeSpawn,
+    flushPersistence: flushSavedEdits,
     setPlayerPosition,
     update,
     consumeDirtyChunks,
