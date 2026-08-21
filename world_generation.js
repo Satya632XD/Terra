@@ -999,8 +999,28 @@
           const ground = getBlock(x, data.height, z);
           const head = getBlock(x, data.height + 1, z);
           const head2 = getBlock(x, data.height + 2, z);
-          if (ground && ground !== 'water' && !head && !head2) {
-            return { x, y: data.height + 1.7, z, groundY: data.height };
+          if (!ground || ground === 'water' || head || head2) continue;
+
+          // A mathematically clear 1x1 column is not enough for a playable
+          // spawn. The player has a horizontal collision footprint, so a
+          // position boxed in by nearby walls can still be immobile. Require
+          // a small open 3x3 pocket around the player at body and head height,
+          // and solid walkable ground across that same footprint.
+          let openPocket = true;
+          for (let ox = -1; ox <= 1 && openPocket; ox++) {
+            for (let oz = -1; oz <= 1; oz++) {
+              const gx = x + ox, gz = z + oz;
+              const nearbyGround = getBlock(gx, data.height, gz);
+              const nearbyBody = getBlock(gx, data.height + 1, gz);
+              const nearbyHead = getBlock(gx, data.height + 2, gz);
+              if (!nearbyGround || nearbyGround === 'water' || nearbyBody || nearbyHead) {
+                openPocket = false;
+                break;
+              }
+            }
+          }
+          if (openPocket) {
+            return { x, y: data.height + 1.72, z, groundY: data.height };
           }
         }
       }
@@ -1258,7 +1278,7 @@
   // vegetation) even after trimming noise octaves, which is still far more
   // than a 16ms frame budget. The previous attempt still called
   // generateChunk() directly from WorldGen.update(), which itself runs
-  // inside requestAnimationFrame every frame ��� so as long as any chunk was
+  // inside requestAnimationFrame every frame — so as long as any chunk was
   // missing (e.g. all ~25 chunks around a fresh spawn), every single
   // animation frame paid a full chunk's cost, which still reads as a
   //
